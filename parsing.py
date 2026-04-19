@@ -12,8 +12,9 @@ from supabase import create_client, Client
 # =========================
 # 🔌 Supabase 接続設定
 # =========================
-SUPABASE_URL = "ここにSupabaseのURLを入れます"
-SUPABASE_KEY = "ここにSupabaseのAPIキー(anon public)を入れます"
+SUPABASE_URL = "https://elmvkjkpdyebbgjsarwq.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVsbXZramtwZHllYmJnanNhcndxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzMjczMzQsImV4cCI6MjA4MzkwMzMzNH0.4DbhZZBRFavbl44Ge07dwhvty4Q2WaDNLJw-GwAOYkY"
+
 
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -189,6 +190,11 @@ def extract_amount(t: str, tight: str) -> int:
 # =========================
 # 🗓 日付・工期抽出
 # =========================
+def _slash_to_fmt(s: str) -> str:
+    """'2025/3/1' 形式の文字列を 'YYYY-MM-DD' 形式に変換する"""
+    parts = s.split("/")
+    return _fmt(parts[0], parts[1], parts[2])
+
 def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
     result = {"date": None, "startDate": None, "endDate": None}
     if company == "グローブホーム" or company == "(株)グローブホーム":
@@ -206,19 +212,16 @@ def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
     if company == "住友不動産" or company == "住友不動産ハウジング(株)":
         all_dates = re.findall(r"(\d{4}/\d{1,2}/\d{1,2})", t)
         kouji_block = re.search(r"工期[・.]納期.*?(\d{4}/\d{1,2}/\d{1,2}).*?(\d{4}/\d{1,2}/\d{1,2})", t, re.DOTALL)
-        def _slash_to_fmt(s: str) -> str:
-            parts = s.split("/")
-            return _fmt(parts, parts, parts)
 
         if kouji_block:
             result["startDate"] = _slash_to_fmt(kouji_block.group(1))
             result["endDate"]   = _slash_to_fmt(kouji_block.group(2))
         elif len(all_dates) >= 2:
-            result["startDate"] = _slash_to_fmt(all_dates)
-            result["endDate"]   = _slash_to_fmt(all_dates)
+            result["startDate"] = _slash_to_fmt(all_dates[0])   # ✅ 修正: インデックス指定
+            result["endDate"]   = _slash_to_fmt(all_dates[-1])  # ✅ 修正: インデックス指定
         elif len(all_dates) == 1:
-            result["startDate"] = _slash_to_fmt(all_dates)
-            result["endDate"]   = _slash_to_fmt(all_dates)
+            result["startDate"] = _slash_to_fmt(all_dates[0])   # ✅ 修正: インデックス指定
+            result["endDate"]   = _slash_to_fmt(all_dates[0])   # ✅ 修正: インデックス指定
 
         order_date_m = re.search(r"⑧注文請書\s*(\d{4}/\d{1,2}/\d{1,2})", t)
         if not order_date_m: order_date_m = re.search(r"⑦注文書[^\d]{0,30}(\d{4}/\d{1,2}/\d{1,2})", t)
@@ -245,13 +248,13 @@ def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
 
     single = [(y, m, d) for y, m, d in re.findall(r"(20\d{2})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})", t) if _is_valid_date(y, m, d)]
     if len(single) == 1:
-        y, m, d = single
+        y, m, d = single[0]
         dstr = _fmt(y, m, d)
         if not result["date"]: result["date"] = dstr
         result["startDate"] = dstr
         result["endDate"] = dstr
     elif len(single) >= 2:
-        y1, m1, d1 = single
+        y1, m1, d1 = single[0]   # ✅ 修正: [0] を明示
         y2, m2, d2 = single[-1]
         if not result["date"]: result["date"] = _fmt(y1, m1, d1)
         result["startDate"] = _fmt(y1, m1, d1)
@@ -260,7 +263,7 @@ def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
     if not result["date"] or not result["startDate"]:
         reiwa_dates = re.findall(r"(?:令和|R)(\d{1,2}|元)[年/.](\d{1,2})[月/.](\d{1,2})", tight)
         if reiwa_dates:
-            ry_str, m, d = reiwa_dates
+            ry_str, m, d = reiwa_dates[0]
             ry = 1 if ry_str == "元" else int(ry_str)
             dstr = _fmt(2018 + ry, m, d)
             if not result["date"]: result["date"] = dstr
@@ -355,7 +358,7 @@ def parse_abe(t: str, tight: str, result: dict):
         nums = re.findall(r"\d{7,10}", tight_fixed)
         exclude_ids = {str(result.get("amount", "")), "4550004", "4550825"}
         candidates = [n for n in nums if n not in exclude_ids and not n.startswith("202") and not n.startswith("090") and not n.startswith("080")]
-        if candidates: result["id"] = candidates
+        if candidates: result["id"] = candidates[0]
 
     # Supabaseと連動する工事コード抽出
     m_code = re.search(f"{label_no1}[^\\d]*(\\d{{4,10}})", tight_fixed)
@@ -423,7 +426,7 @@ def parse_ai(t: str, tight: str, result: dict):
     nums = re.findall(r"\d{8,14}", tight)
     valid_nums = [n for n in nums if not n.startswith("202") and not n.startswith("0")]
     if valid_nums:
-        result["id"] = valid_nums
+        result["id"] = valid_nums[0]
 
 # ================================================================== #
 # 🚀 メイン処理
@@ -449,7 +452,7 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
 
     company = _detect_company(t, tight, file_name)
     result["company"] = company
-    
+
     # 🌟 ここでSupabaseから設定を取得し、抽出ロジックに渡す
     config = get_client_config(company)
     result["config"] = config
