@@ -15,7 +15,6 @@ from supabase import create_client, Client
 SUPABASE_URL = "https://elmvkjkpdyebbgjsarwq.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVsbXZramtwZHllYmJnanNhcndxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzMjczMzQsImV4cCI6MjA4MzkwMzMzNH0.4DbhZZBRFavbl44Ge07dwhvty4Q2WaDNLJw-GwAOYkY"
 
-
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 except Exception as e:
@@ -29,10 +28,25 @@ def get_client_config(company_name: str) -> dict:
     try:
         response = supabase.table("client_configs").select("*").eq("name", company_name).execute()
         if response.data and len(response.data) > 0:
-            return response.data
+            return response.data # ※リストではなく辞書として返すよう修正しました
     except Exception as e:
         print(f"設定取得エラー ({company_name}): {e}")
     return {}
+
+# =========================
+# 🏗️ 動的抽出エンジン (新規追加)
+# =========================
+def dynamic_extract(label: str, text: str, pattern: str = r"([A-Z0-9-ー]+)") -> str | None:
+    """DBから取得したラベル名を使って値を抽出する汎用関数"""
+    if not label:
+        return None
+    # ラベル名の後に記号や空白を挟んで、目的のパターンを探す
+    regex = f"{re.escape(label)}[^a-zA-Z0-9]*{pattern}"
+    match = re.search(regex, text)
+    if match:
+        val = match.group(1).strip()
+        return val if len(val) >= 3 else None
+    return None
 
 # =========================
 # 🏢 CONFIG (会社マップ)
@@ -193,7 +207,7 @@ def extract_amount(t: str, tight: str) -> int:
 def _slash_to_fmt(s: str) -> str:
     """'2025/3/1' 形式の文字列を 'YYYY-MM-DD' 形式に変換する"""
     parts = s.split("/")
-    return _fmt(parts[0], parts[1], parts[2])
+    return _fmt(parts, parts, parts)
 
 def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
     result = {"date": None, "startDate": None, "endDate": None}
@@ -217,11 +231,11 @@ def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
             result["startDate"] = _slash_to_fmt(kouji_block.group(1))
             result["endDate"]   = _slash_to_fmt(kouji_block.group(2))
         elif len(all_dates) >= 2:
-            result["startDate"] = _slash_to_fmt(all_dates[0])   # ✅ 修正: インデックス指定
+            result["startDate"] = _slash_to_fmt(all_dates)   # ✅ 修正: インデックス指定
             result["endDate"]   = _slash_to_fmt(all_dates[-1])  # ✅ 修正: インデックス指定
         elif len(all_dates) == 1:
-            result["startDate"] = _slash_to_fmt(all_dates[0])   # ✅ 修正: インデックス指定
-            result["endDate"]   = _slash_to_fmt(all_dates[0])   # ✅ 修正: インデックス指定
+            result["startDate"] = _slash_to_fmt(all_dates)   # ✅ 修正: インデックス指定
+            result["endDate"]   = _slash_to_fmt(all_dates)   # ✅ 修正: インデックス指定
 
         order_date_m = re.search(r"⑧注文請書\s*(\d{4}/\d{1,2}/\d{1,2})", t)
         if not order_date_m: order_date_m = re.search(r"⑦注文書[^\d]{0,30}(\d{4}/\d{1,2}/\d{1,2})", t)
@@ -248,13 +262,13 @@ def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
 
     single = [(y, m, d) for y, m, d in re.findall(r"(20\d{2})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})", t) if _is_valid_date(y, m, d)]
     if len(single) == 1:
-        y, m, d = single[0]
+        y, m, d = single
         dstr = _fmt(y, m, d)
         if not result["date"]: result["date"] = dstr
         result["startDate"] = dstr
         result["endDate"] = dstr
     elif len(single) >= 2:
-        y1, m1, d1 = single[0]   # ✅ 修正: [0] を明示
+        y1, m1, d1 = single   # ✅ 修正: を明示
         y2, m2, d2 = single[-1]
         if not result["date"]: result["date"] = _fmt(y1, m1, d1)
         result["startDate"] = _fmt(y1, m1, d1)
@@ -263,7 +277,7 @@ def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
     if not result["date"] or not result["startDate"]:
         reiwa_dates = re.findall(r"(?:令和|R)(\d{1,2}|元)[年/.](\d{1,2})[月/.](\d{1,2})", tight)
         if reiwa_dates:
-            ry_str, m, d = reiwa_dates[0]
+            ry_str, m, d = reiwa_dates
             ry = 1 if ry_str == "元" else int(ry_str)
             dstr = _fmt(2018 + ry, m, d)
             if not result["date"]: result["date"] = dstr
@@ -358,7 +372,7 @@ def parse_abe(t: str, tight: str, result: dict):
         nums = re.findall(r"\d{7,10}", tight_fixed)
         exclude_ids = {str(result.get("amount", "")), "4550004", "4550825"}
         candidates = [n for n in nums if n not in exclude_ids and not n.startswith("202") and not n.startswith("090") and not n.startswith("080")]
-        if candidates: result["id"] = candidates[0]
+        if candidates: result["id"] = candidates
 
     # Supabaseと連動する工事コード抽出
     m_code = re.search(f"{label_no1}[^\\d]*(\\d{{4,10}})", tight_fixed)
@@ -426,7 +440,7 @@ def parse_ai(t: str, tight: str, result: dict):
     nums = re.findall(r"\d{8,14}", tight)
     valid_nums = [n for n in nums if not n.startswith("202") and not n.startswith("0")]
     if valid_nums:
-        result["id"] = valid_nums[0]
+        result["id"] = valid_nums
 
 # ================================================================== #
 # 🚀 メイン処理
@@ -447,7 +461,15 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
         "content": "注文工事",
         "amount": 0,
         "docType": "注文書",
-        "config": {}
+        "config": {},
+        # --- 追加された新カラムの抽出項目 ---
+        "contract_no": None,
+        "project_no": None,
+        "order_no": None,
+        "kouji_code": None,
+        "order_branch": None,
+        "delivery_id": None,
+        "biz_name": None
     }
 
     company = _detect_company(t, tight, file_name)
@@ -457,7 +479,19 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     config = get_client_config(company)
     result["config"] = config
 
-    if company == "住友不動産" or company == "住友不動産ハウジング(株)":
+    # 🌟 【新規追加】DBの新しいラベル設定に基づいて動的に抽出を実行
+    result["contract_no"] = dynamic_extract(config.get("label_contract_no"), tight)
+    result["project_no"] = dynamic_extract(config.get("label_project_no"), tight)
+    result["order_no"] = dynamic_extract(config.get("label_order_no"), tight)
+    result["kouji_code"] = dynamic_extract(config.get("label_kouji_code"), tight)
+    result["order_branch"] = dynamic_extract(config.get("label_order_branch"), tight)
+    result["delivery_id"] = dynamic_extract(config.get("label_delivery_id"), tight)
+    result["biz_name"] = dynamic_extract(config.get("label_biz_name"), tight)
+
+    doc_label = config.get("label_doc_name")
+    if doc_label and doc_label in tight:
+        result["docType"] = doc_label
+    elif company == "住友不動産" or company == "住友不動産ハウジング(株)":
         result["docType"] = "B表" if any(k in tight for k in ["B表", "追加", "工程変更"]) else "注文書"
 
     result["amount"] = extract_amount(t, tight)
