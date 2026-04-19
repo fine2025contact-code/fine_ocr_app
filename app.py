@@ -222,6 +222,20 @@ EDITOR_COLUMNS = [
 
 # --- 4. メインアプリケーション ---
 def main() -> None:
+    # --- パスワード認証機能 ---
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        st.markdown("### 🔒 セキュリティ認証")
+        password_input = st.text_input("パスワードを入力してください", type="password")
+        if st.button("ログイン"):
+            if password_input == st.secrets["APP_PASSWORD"]:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("パスワードが正しくありません")
+        return  # 認証されるまでこれ以降のコード（OCR画面）は実行しない
     # 状態の初期化
     if "fine_rows" not in st.session_state:
         st.session_state.fine_rows = []
