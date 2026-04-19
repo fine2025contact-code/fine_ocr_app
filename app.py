@@ -155,18 +155,15 @@ ocr_reader = load_ocr()
 # --- 3. ユーティリティ ---
 def _get_supabase() -> Client | None:
     try:
-        # Secretsから取得
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
         
-        # 接続オプションを明示的に指定（新しいキー形式に対応するため）
-        return create_client(
-            url, 
-            key,
-            options={"persist_session": False, "auto_refresh_token": False}
-        )
+        # 修正：supabase-pyの新しいバージョンに対応した接続方法
+        from supabase.lib.client_options import ClientOptions
+        options = ClientOptions(postgrest_client_timeout=10, storage_client_timeout=10)
+        
+        return create_client(url, key, options=options)
     except Exception as e:
-        # エラー内容を画面に出して原因を特定しやすくする
         st.sidebar.error(f"接続エラー詳細: {e}")
         return None
 def extract_pdf_text_local(file_bytes: bytes, filename: str) -> str:
