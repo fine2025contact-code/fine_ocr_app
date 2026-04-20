@@ -1,6 +1,7 @@
 """
 FINE: EasyOCR & PDFgear 抽出テキスト対応 & 全社ハイブリッド版。
 Supabase連動による動的項目抽出対応版（アイ工務店対応）
+宮崎工務店・宮崎・新生建設 対応追加版
 """
 from __future__ import annotations
 import re
@@ -28,7 +29,7 @@ def get_client_config(company_name: str) -> dict:
     try:
         response = supabase.table("client_configs").select("*").eq("name", company_name).execute()
         if response.data and len(response.data) > 0:
-            return response.data[0]  # ✅ 修正: リストの最初の要素（辞書）を返す
+            return response.data[0]  # ✅ 修正: 辞書として返す
     except Exception as e:
         print(f"設定取得エラー ({company_name}): {e}")
     return {}
@@ -177,7 +178,7 @@ def extract_amount(t: str, tight: str) -> int:
         val = _num(bk_m.group(1))
         if 1000 <= val <= 9000000: return val
 
-    priority_labels = ["今回発注額", "今回合計", "御発注金額", "今回発注合計", "税込金額", "発注金額"]
+    priority_labels = ["今回発注額", "今回合計", "御発注金額", "今回発注合計", "税込金額", "発注金額", "注文金額"]
     label_amts = []
     for label in priority_labels:
         m = re.search(re.escape(label) + r"[^0-9]{0,10}([0-9,]{4,12})", tight)
@@ -247,10 +248,23 @@ def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
             else: result["date"] = _slash_to_fmt(all_dates[-1])
         return result
 
+    # ✅ 宮崎・新生建設系: 「自 YYYY年MM月DD日 至 YYYY年MM月DD日」を優先処理
+    kouji_m = re.search(
+        r"[自从]\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*[至迄]\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
+        t
+    )
+    if kouji_m:
+        result["startDate"] = _fmt(kouji_m.group(1), kouji_m.group(2), kouji_m.group(3))
+        result["endDate"]   = _fmt(kouji_m.group(4), kouji_m.group(5), kouji_m.group(6))
+
+    # 注文日（最初に登場するYYYY年MM月DD日）
     for y, m, d in re.findall(r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", t):
         if _is_valid_date(y, m, d):
             result["date"] = _fmt(y, m, d)
             break
+
+    if result["startDate"]:
+        return result
 
     pairs = re.findall(r"(20\d{2})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})\D{0,10}(20\d{2})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})", t)
     for p in pairs:
@@ -308,8 +322,9 @@ def _detect_company(t: str, tight: str, file_name: str) -> str:
     if "ファースト住建" in t or "ファースト住建" in file_name: return "ファースト住建"
     if "アイ工務店" in t or "アイ工務店" in file_name: return "アイ工務店"
     if "新生建設" in t or "新生建設" in file_name: return "新生建設(株)"
+    # ✅ 宮崎工務店を先に判定（「宮崎」より具体的なキーワードを優先）
     if "宮崎工務店" in t or "宮崎工務店" in file_name: return "(株)宮崎工務店"
-    if "宮崎" in t or "宮崎" in file_name: return "(株)宮崎"
+    if "株式会社宮崎" in t or "株式会社宮崎" in file_name: return "(株)宮崎"
     if "野村建築" in t or "野村建築" in file_name: return "(株)野村建築"
     if "エムズアソシエイツ" in t or "エムズ" in file_name: return "(株)エムズアソシエイツ"
     if "相互設備" in t or "相互設備" in file_name: return "相互設備"
@@ -372,7 +387,7 @@ def parse_abe(t: str, tight: str, result: dict):
         nums = re.findall(r"\d{7,10}", tight_fixed)
         exclude_ids = {str(result.get("amount", "")), "4550004", "4550825"}
         candidates = [n for n in nums if n not in exclude_ids and not n.startswith("202") and not n.startswith("090") and not n.startswith("080")]
-        if candidates: result["id"] = candidates[0]  # ✅ 修正: リストの最初の要素を代入
+        if candidates: result["id"] = candidates[0]  # ✅ 修正
 
     m_code = re.search(f"{label_no1}[^\\d]*(\\d{{4,10}})", tight_fixed)
     if m_code: result["client_code3"] = m_code.group(1)
@@ -437,7 +452,58 @@ def parse_ai(t: str, tight: str, result: dict):
     nums = re.findall(r"\d{8,14}", tight)
     valid_nums = [n for n in nums if not n.startswith("202") and not n.startswith("0")]
     if valid_nums:
-        result["id"] = valid_nums[0]  # ✅ 修正: リストの最初の要素を代入
+        result["id"] = valid_nums[0]  # ✅ 修正
+
+# =========================
+# ✅ 新規追加: 宮崎工務店・宮崎・新生建設 共通パーサー
+# =========================
+def parse_miyazaki_shinsei(t: str, tight: str, result: dict):
+    """
+    宮崎工務店・(株)宮崎・新生建設 共通帳票パーサー。
+    帳票フォーマット:
+      注文番号 : T25XX-X-XX
+      工事番号 : 8桁数字
+      工事名称 : テキスト
+      工　期  : 自 YYYY年MM月DD日 至 YYYY年MM月DD日
+    """
+
+    # --- 注文番号（Tから始まる番号）→ client_code3 ---
+    m_order = re.search(r"注文番号[\s:：]*(T\d{4}[-－]\d{1,2}[-－]\d{1,2})", t)
+    if m_order:
+        result["client_code3"] = m_order.group(1).replace("－", "-")
+
+    # --- 工事番号（7〜10桁）→ id ---
+    m_kojino = re.search(r"工事番号[\s:：]*(\d{7,10})", t)
+    if m_kojino:
+        result["id"] = m_kojino.group(1)
+
+    # --- 工事名称 → content ---
+    m_content = re.search(r"工事名称[\s:：]*([^\n]{4,80})", t)
+    if m_content:
+        content = m_content.group(1).strip()
+        for stop in ["現場主任", "工事場所", "工　期", "工期", "請求締日", "支払"]:
+            if stop in content:
+                content = content[:content.index(stop)].strip()
+        if len(content) >= 3:
+            result["content"] = content
+
+    # --- 工期: 「自 YYYY年MM月DD日 至 YYYY年MM月DD日」---
+    m_kouji = re.search(
+        r"[自从]\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*[至迄]\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
+        t
+    )
+    if m_kouji:
+        result["startDate"] = _fmt(m_kouji.group(1), m_kouji.group(2), m_kouji.group(3))
+        result["endDate"]   = _fmt(m_kouji.group(4), m_kouji.group(5), m_kouji.group(6))
+
+    # --- 注文金額 → amount ---
+    m_amt = re.search(r"注文金額[\s¥￥\\]*([0-9,]+)", tight)
+    if m_amt:
+        val = _num(m_amt.group(1))
+        if 1000 <= val <= 9_000_000:
+            result["amount"] = val
+
+    # 工事場所が空欄の帳票のため address は "-" のまま維持
 
 # ================================================================== #
 # 🚀 メイン処理
@@ -475,17 +541,17 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     result["config"] = config
 
     result["contract_no"] = dynamic_extract(config.get("label_contract_no"), tight)
-    result["project_no"] = dynamic_extract(config.get("label_project_no"), tight)
-    result["order_no"] = dynamic_extract(config.get("label_order_no"), tight)
-    result["kouji_code"] = dynamic_extract(config.get("label_kouji_code"), tight)
-    result["order_branch"] = dynamic_extract(config.get("label_order_branch"), tight)
+    result["project_no"]  = dynamic_extract(config.get("label_project_no"), tight)
+    result["order_no"]    = dynamic_extract(config.get("label_order_no"), tight)
+    result["kouji_code"]  = dynamic_extract(config.get("label_kouji_code"), tight)
+    result["order_branch"]= dynamic_extract(config.get("label_order_branch"), tight)
     result["delivery_id"] = dynamic_extract(config.get("label_delivery_id"), tight)
-    result["biz_name"] = dynamic_extract(config.get("label_biz_name"), tight)
+    result["biz_name"]    = dynamic_extract(config.get("label_biz_name"), tight)
 
     doc_label = config.get("label_doc_name")
     if doc_label and doc_label in tight:
         result["docType"] = doc_label
-    elif company == "住友不動産" or company == "住友不動産ハウジング(株)":
+    elif company in ("住友不動産", "住友不動産ハウジング(株)"):
         result["docType"] = "B表" if any(k in tight for k in ["B表", "追加", "工程変更"]) else "注文書"
 
     result["amount"] = extract_amount(t, tight)
@@ -498,16 +564,21 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     code_e = re.search(r"(E[0-9]{5})", tight)
     if code_e: result["client_code2"] = code_e.group(0)
 
+    # --- 会社別パーサー振り分け ---
     if company == "ファースト住建":
         parse_first(t, tight, result)
     elif company == "阿部建設":
         parse_abe(t, tight, result)
-    elif company == "住友不動産" or company == "住友不動産ハウジング(株)":
+    elif company in ("住友不動産", "住友不動産ハウジング(株)"):
         parse_sumitomo(t, tight, result)
     elif company == "アイ工務店":
         parse_ai(t, tight, result)
+    elif company in ("(株)宮崎工務店", "(株)宮崎", "新生建設(株)"):
+        # ✅ 新規: 宮崎・新生建設系は専用パーサーで上書き
+        parse_miyazaki_shinsei(t, tight, result)
 
-    if not result["startDate"] and result["date"]: result["startDate"] = result["date"]
+    if not result["startDate"] and result["date"]:
+        result["startDate"] = result["date"]
 
     if not result["id"]:
         m = re.search(r"(工事番号|契約番号|発注番号|現場ID).*?(\d{6,10})", t)
