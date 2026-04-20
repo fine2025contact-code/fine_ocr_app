@@ -27,9 +27,10 @@ def get_client_config(company_name: str) -> dict:
     if not supabase:
         return {}
     try:
-        response = supabase.table("client_configs").select("*").eq("name", company_name).execute()
+        # 名前で検索（ilikeを使うと部分一致・大文字小文字無視で検索できるので安全です）
+        response = supabase.table("client_configs").select("*").ilike("name", f"%{company_name}%").execute()
         if response.data and len(response.data) > 0:
-            return response.data[0]  # ✅ 修正: 辞書として返す
+            return response.data
     except Exception as e:
         print(f"設定取得エラー ({company_name}): {e}")
     return {}
@@ -51,29 +52,29 @@ def dynamic_extract(label: str, text: str, pattern: str = r"([A-Z0-9-ー]+)") ->
 # =========================
 # 🏢 CONFIG (会社マップ)
 # =========================
+# =========================
+# 🏢 CONFIG (会社マップ)
+# =========================
 DEFAULT_CLIENT_ID: Final[str] = "9336c048-c375-4094-8c6b-f6b95fd7a56c"
+
 CLIENT_ID_MAP: Final[dict[str, str]] = {
-    "住友不動産":    "7ba58ec1-6a68-463e-bcd9-1ebeb63c85fb",
-    "住友不動産ハウジング(株)": "7ba58ec1-6a68-463e-bcd9-1ebeb63c85fb",
-    "グローブホーム": "1886baba-4824-47af-b466-b39b7d695b84",
-    "(株)グローブホーム": "1886baba-4824-47af-b466-b39b7d695b84",
-    "阿部建設":     "0cb5c980-9096-4c52-9dd7-7f24bc6b9a03",
+    # 今回提供いただいた確定UUID
+    "新生建設": "00350a82-b133-44a4-bc8e-d96344389b76",
+    "新生建設㈱": "00350a82-b133-44a4-bc8e-d96344389b76",
+    "宮崎工務店": "07bb4fc6-07a3-49f9-b64b-61dab8701489",
+    "㈱宮崎工務店": "07bb4fc6-07a3-49f9-b64b-61dab8701489",
+    "アイ工務店": "14db753b-4608-44a1-8fb3-15a2cd770d86",
+    "相互設備": "9e658c6b-c388-4380-ad61-d3c74cdb2bcd",
+    "三成工業": "ba61ff6e-4268-4fb6-9080-252844d2f5d6",
+    "㈲三成工業": "ba61ff6e-4268-4fb6-9080-252844d2f5d6",
+    "DMB東海建材": "ae3f70fd-044e-4451-96cd-ed422663c565",
+    "飛騨製材": "e81715b3-c420-40d5-80ab-1d6949091faf",
+    
+    # 既存の有効なUUID
+    "住友不動産": "7ba58ec1-6a68-463e-bcd9-1ebeb63c85fb",
+    "阿部建設": "0cb5c980-9096-4c52-9dd7-7f24bc6b9a03",
     "ファースト住建": "4009a91d-61cf-4f3f-bd2f-4937b376f68d",
-    "アイ工務店":   "dummy-id-ai-koumuten",
-    "新生建設(株)": "dummy-id-shinsei",
-    "(株)宮崎工務店": "dummy-id-miyazaki-koumuten",
-    "(株)宮崎":     "dummy-id-miyazaki",
-    "(株)野村建築": "dummy-id-nomura",
-    "TEST":         "dummy-id-test",
-    "個人":         "dummy-id-kojin",
-    "(株)エムズアソシエイツ": "dummy-id-ms",
-    "相互設備":     "dummy-id-sougo",
-    "(株)東海ビルド": "dummy-id-tokai-build",
-    "(有)三成工業": "dummy-id-sansei",
-    "アーキテックス(株)": "dummy-id-architex",
-    "DMB東海建材": "dummy-id-dmb",
-    "飛騨製材":     "dummy-id-hida",
-    "(株)ヤマスミ建設": "dummy-id-yamasumi",
+    "TEST": "9336c048-c375-4094-8c6b-f6b95fd7a56c",
 }
 
 # =========================
@@ -105,8 +106,13 @@ def _clip_address(addr: str) -> str:
     return addr
 
 def resolve_client_id(moto_name: str) -> str:
+    # 判定用に文字を統一
+    target = str(moto_name).replace("株式会社", "").replace("（株）", "").replace("(株)", "").replace("㈱", "").strip()
+    
     for key, val in CLIENT_ID_MAP.items():
-        if key in str(moto_name): return val
+        # キー（新生建設など）が含まれているかチェック
+        if key.replace("㈱", "").replace("㈲", "") in target: 
+            return val
     return DEFAULT_CLIENT_ID
 
 def _slash_to_fmt(s: str) -> str:
