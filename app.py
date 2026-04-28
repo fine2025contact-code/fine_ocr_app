@@ -356,7 +356,7 @@ def main() -> None:
         st.markdown("""
             <div style="background-color: #fee2e2; border-left: 6px solid #ef4444; padding: 1rem; margin-bottom: 1rem; border-radius: 0.5rem;">
                 <p style="color: #b91c1c; font-size: 1.35rem; font-weight: bold; margin: 0;">
-                    ⚠️ ※必ず読み込み結果を目視で確認してから同期してください。
+                    ⚠️ ※同期前に、抽出されたデータに誤りがないかご確認ください。
                 </p>
             </div>
         """, unsafe_allow_html=True)
