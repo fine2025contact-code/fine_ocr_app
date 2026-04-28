@@ -560,7 +560,7 @@ def parse_globe(t: str, tight: str, result: dict):
     if not m_contract:
         m_contract = re.search(r"契約番号([\d\-]+)", tight)
     if m_contract:
-        contract_digits = re.sub(r"[^0-9]", "", m_contract.group(1).strip())
+        contract_digits = re.sub(r"[^0-9\-]", "", m_contract.group(1).strip())
         if contract_digits:
             result["id"] = contract_digits
 
