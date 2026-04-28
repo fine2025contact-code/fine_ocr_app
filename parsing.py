@@ -160,6 +160,7 @@ def resolve_client_id(moto_name: str) -> str:
 
 def _slash_to_fmt(s: str) -> str:
     parts = s.split("/")
+    # インデックスを指定して y, m, d を渡す
     return _fmt(parts, parts, parts)
 
 # =========================
