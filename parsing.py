@@ -2,6 +2,7 @@
 FINE: EasyOCR & PDFgear 抽出テキスト対応 & 全社ハイブリッド版。
 Supabase連動による動的項目抽出対応版（アイ工務店対応）
 宮崎工務店・宮崎・新生建設 対応追加版
+グローブホーム 専用パーサー追加版
 """
 from __future__ import annotations
 import re
@@ -27,7 +28,6 @@ def get_client_config(company_name: str) -> dict:
     if not supabase:
         return {}
     try:
-        # 名前で検索（ilikeを使うと部分一致・大文字小文字無視で検索できるので安全です）
         response = supabase.table("client_configs").select("*").ilike("name", f"%{company_name}%").execute()
         if response.data and len(response.data) > 0:
             return response.data
@@ -52,9 +52,6 @@ def dynamic_extract(label: str, text: str, pattern: str = r"([A-Z0-9-ー]+)") ->
 # =========================
 # 🏢 CONFIG (会社マップ)
 # =========================
-# =========================
-# 🏢 CONFIG (会社マップ)
-# =========================
 DEFAULT_CLIENT_ID: Final[str] = "9336c048-c375-4094-8c6b-f6b95fd7a56c"
 
 CLIENT_ID_MAP: Final[dict[str, str]] = {
@@ -69,7 +66,6 @@ CLIENT_ID_MAP: Final[dict[str, str]] = {
     "㈲三成工業": "ba61ff6e-4268-4fb6-9080-252844d2f5d6",
     "DMB東海建材": "ae3f70fd-044e-4451-96cd-ed422663c565",
     "飛騨製材": "e81715b3-c420-40d5-80ab-1d6949091faf",
-    
     # 既存の有効なUUID
     "住友不動産": "7ba58ec1-6a68-463e-bcd9-1ebeb63c85fb",
     "阿部建設": "0cb5c980-9096-4c52-9dd7-7f24bc6b9a03",
@@ -106,19 +102,16 @@ def _clip_address(addr: str) -> str:
     return addr
 
 def resolve_client_id(moto_name: str) -> str:
-    # 判定用に文字を統一
     target = str(moto_name).replace("株式会社", "").replace("（株）", "").replace("(株)", "").replace("㈱", "").strip()
-    
     for key, val in CLIENT_ID_MAP.items():
-        # キー（新生建設など）が含まれているかチェック
-        if key.replace("㈱", "").replace("㈲", "") in target: 
+        if key.replace("㈱", "").replace("㈲", "") in target:
             return val
     return DEFAULT_CLIENT_ID
 
 def _slash_to_fmt(s: str) -> str:
     """'2025/3/1' 形式の文字列を 'YYYY-MM-DD' 形式に変換する"""
     parts = s.split("/")
-    return _fmt(parts[0], parts[1], parts[2])  # ✅ 修正: インデックスを明示
+    return _fmt(parts[0], parts[1], parts[2])
 
 # =========================
 # 🧹 Normalize
@@ -238,11 +231,11 @@ def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
             result["startDate"] = _slash_to_fmt(kouji_block.group(1))
             result["endDate"]   = _slash_to_fmt(kouji_block.group(2))
         elif len(all_dates) >= 2:
-            result["startDate"] = _slash_to_fmt(all_dates[0])   # ✅ 修正
+            result["startDate"] = _slash_to_fmt(all_dates[0])
             result["endDate"]   = _slash_to_fmt(all_dates[-1])
         elif len(all_dates) == 1:
-            result["startDate"] = _slash_to_fmt(all_dates[0])   # ✅ 修正
-            result["endDate"]   = _slash_to_fmt(all_dates[0])   # ✅ 修正
+            result["startDate"] = _slash_to_fmt(all_dates[0])
+            result["endDate"]   = _slash_to_fmt(all_dates[0])
 
         order_date_m = re.search(r"⑧注文請書\s*(\d{4}/\d{1,2}/\d{1,2})", t)
         if not order_date_m: order_date_m = re.search(r"⑦注文書[^\d]{0,30}(\d{4}/\d{1,2}/\d{1,2})", t)
@@ -282,13 +275,13 @@ def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
 
     single = [(y, m, d) for y, m, d in re.findall(r"(20\d{2})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})", t) if _is_valid_date(y, m, d)]
     if len(single) == 1:
-        y, m, d = single[0]  # ✅ 修正
+        y, m, d = single[0]
         dstr = _fmt(y, m, d)
         if not result["date"]: result["date"] = dstr
         result["startDate"] = dstr
         result["endDate"] = dstr
     elif len(single) >= 2:
-        y1, m1, d1 = single[0]   # ✅ 修正
+        y1, m1, d1 = single[0]
         y2, m2, d2 = single[-1]
         if not result["date"]: result["date"] = _fmt(y1, m1, d1)
         result["startDate"] = _fmt(y1, m1, d1)
@@ -297,7 +290,7 @@ def extract_dates_perfect(t: str, tight: str, company: str) -> dict:
     if not result["date"] or not result["startDate"]:
         reiwa_dates = re.findall(r"(?:令和|R)(\d{1,2}|元)[年/.](\d{1,2})[月/.](\d{1,2})", tight)
         if reiwa_dates:
-            ry_str, m, d = reiwa_dates[0]  # ✅ 修正
+            ry_str, m, d = reiwa_dates[0]
             ry = 1 if ry_str == "元" else int(ry_str)
             dstr = _fmt(2018 + ry, m, d)
             if not result["date"]: result["date"] = dstr
@@ -328,7 +321,6 @@ def _detect_company(t: str, tight: str, file_name: str) -> str:
     if "ファースト住建" in t or "ファースト住建" in file_name: return "ファースト住建"
     if "アイ工務店" in t or "アイ工務店" in file_name: return "アイ工務店"
     if "新生建設" in t or "新生建設" in file_name: return "新生建設(株)"
-    # ✅ 宮崎工務店を先に判定（「宮崎」より具体的なキーワードを優先）
     if "宮崎工務店" in t or "宮崎工務店" in file_name: return "(株)宮崎工務店"
     if "株式会社宮崎" in t or "株式会社宮崎" in file_name: return "(株)宮崎"
     if "野村建築" in t or "野村建築" in file_name: return "(株)野村建築"
@@ -393,7 +385,7 @@ def parse_abe(t: str, tight: str, result: dict):
         nums = re.findall(r"\d{7,10}", tight_fixed)
         exclude_ids = {str(result.get("amount", "")), "4550004", "4550825"}
         candidates = [n for n in nums if n not in exclude_ids and not n.startswith("202") and not n.startswith("090") and not n.startswith("080")]
-        if candidates: result["id"] = candidates[0]  # ✅ 修正
+        if candidates: result["id"] = candidates[0]
 
     m_code = re.search(f"{label_no1}[^\\d]*(\\d{{4,10}})", tight_fixed)
     if m_code: result["client_code3"] = m_code.group(1)
@@ -458,11 +450,8 @@ def parse_ai(t: str, tight: str, result: dict):
     nums = re.findall(r"\d{8,14}", tight)
     valid_nums = [n for n in nums if not n.startswith("202") and not n.startswith("0")]
     if valid_nums:
-        result["id"] = valid_nums[0]  # ✅ 修正
+        result["id"] = valid_nums[0]
 
-# =========================
-# ✅ 新規追加: 宮崎工務店・宮崎・新生建設 共通パーサー
-# =========================
 def parse_miyazaki_shinsei(t: str, tight: str, result: dict):
     """
     宮崎工務店・(株)宮崎・新生建設 共通帳票パーサー。
@@ -509,7 +498,71 @@ def parse_miyazaki_shinsei(t: str, tight: str, result: dict):
         if 1000 <= val <= 9_000_000:
             result["amount"] = val
 
-    # 工事場所が空欄の帳票のため address は "-" のまま維持
+# =========================
+# ✅ 追加: グローブホーム専用パーサー
+# =========================
+def parse_globe(t: str, tight: str, result: dict):
+    """
+    グローブホーム専用帳票パーサー（発注書（工事））。
+    修正点:
+      1. content  : 「工事件名」ラベル直後のテキストを取得
+      2. address  : extract_address() の結果の先頭1文字余分を除去
+      3. id       : 契約番号（例: 07-025）の数字部分のみ（ハイフン除去）を取得
+    """
+    # 都道府県リスト（先頭文字除去判定用）
+    PREFS = (
+        "東京都", "北海道", "京都府", "大阪府",
+        "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
+        "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "神奈川県",
+        "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県",
+        "岐阜県", "静岡県", "愛知県", "三重県",
+        "滋賀県", "兵庫県", "奈良県", "和歌山県",
+        "鳥取県", "島根県", "岡山県", "広島県", "山口県",
+        "徳島県", "香川県", "愛媛県", "高知県",
+        "福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県",
+    )
+
+    # --- 1. 工事件名 → content ---
+    # tight（スペース除去版）で「工事件名」直後を抽出
+    m_content = re.search(r"工事件名(.+?)(?=施工場所|現場|工期|契約|発注|小計|消費|合計|$)", tight)
+    if m_content:
+        raw = m_content.group(1).strip()
+        for stop in ["施工場所", "現場", "工期", "契約", "発注", "小計", "消費", "合計"]:
+            if stop in raw:
+                raw = raw[:raw.index(stop)].strip()
+        if len(raw) >= 2:
+            result["content"] = raw
+
+    # tight で取れない場合は改行ありの元テキストで再試行
+    if result.get("content") in (None, "注文工事"):
+        m_content_line = re.search(r"工事件名\s*([^\n]{2,50})", t)
+        if m_content_line:
+            raw = m_content_line.group(1).strip()
+            for stop in ["施工場所", "現場", "工期", "契約"]:
+                if stop in raw:
+                    raw = raw[:raw.index(stop)].strip()
+            if len(raw) >= 2:
+                result["content"] = raw
+
+    # --- 2. 現場住所の先頭1文字除去 ---
+    # extract_address() が「号愛知県...」のように先頭に余分な1文字を含む場合がある
+    # 都道府県名リストで完全一致チェックし、合致しない場合のみ先頭1文字を除去
+    addr = result.get("address", "-")
+    if addr and addr != "-":
+        if not any(addr.startswith(p) for p in PREFS):
+            candidate = addr[1:]
+            if any(candidate.startswith(p) for p in PREFS):
+                result["address"] = candidate
+
+    # --- 3. id = 契約番号の数字部分（ハイフン除去）---
+    # 例: 07-033 → "07033"、07-021-05 → "0702105"
+    m_contract = re.search(r"契約番号\s*([\d\-]+)", t)
+    if not m_contract:
+        m_contract = re.search(r"契約番号([\d\-]+)", tight)
+    if m_contract:
+        contract_digits = re.sub(r"[^0-9]", "", m_contract.group(1).strip())
+        if contract_digits:
+            result["id"] = contract_digits
 
 # ================================================================== #
 # 🚀 メイン処理
@@ -580,8 +633,9 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     elif company == "アイ工務店":
         parse_ai(t, tight, result)
     elif company in ("(株)宮崎工務店", "(株)宮崎", "新生建設(株)"):
-        # ✅ 新規: 宮崎・新生建設系は専用パーサーで上書き
         parse_miyazaki_shinsei(t, tight, result)
+    elif company == "グローブホーム":      # ✅ 追加
+        parse_globe(t, tight, result)      # ✅ 追加
 
     if not result["startDate"] and result["date"]:
         result["startDate"] = result["date"]
