@@ -6,7 +6,6 @@ Supabase連動による動的項目抽出対応版（アイ工務店対応）
 全9社対応・共通辞書（COMPANY_LABEL_MAP）統合・住所抽出強化版
 
 【修正内容】
-- _slash_to_fmt: 引数 parts (list) の渡し方を修正 (parts, parts, parts)
 - parse_ai: インボイス番号(T始まり)を除外、13桁バーコードのみid抽出
 - parse_ai: content に明細ヘッダーゴミが混入する問題を修正（工事名ラベルから直接取得）
 - parse_ai: site_name / content を明確に分離（site_name=工事名、content=明細名称）
@@ -168,7 +167,6 @@ def resolve_client_id(moto_name: str) -> str:
             return val
     return DEFAULT_CLIENT_ID
 
-# 【修正済み】
 def _slash_to_fmt(s: str) -> str:
     parts = s.split("/")
     if len(parts) == 3:
