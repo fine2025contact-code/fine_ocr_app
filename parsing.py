@@ -145,7 +145,14 @@ def _num(s: str) -> int:
     return int(cleaned) if cleaned else 0
 
 def _fmt(y: str|int, m: str|int, d: str|int) -> str:
-    return f"{int(y)}-{int(m):02d}-{int(d):02d}"
+    try:
+        # 数字以外の文字（空白やゴミ）を取り除いてから変換することでエラーを防止
+        y_cl = re.sub(r'\D', '', str(y))
+        m_cl = re.sub(r'\D', '', str(m))
+        d_cl = re.sub(r'\D', '', str(d))
+        return f"{int(y_cl)}-{int(m_cl):02d}-{int(d_cl):02d}"
+    except Exception:
+        return f"{y}-{m}-{d}"
 
 def _is_valid_date(y: str, m: str, d: str) -> bool:
     try:

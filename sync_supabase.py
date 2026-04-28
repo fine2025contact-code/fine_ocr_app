@@ -117,28 +117,27 @@ def insert_fine_row(
 ) -> None:
     """
     1行を projects / orders / order_items に登録。
-    OCRからの直接連携（英語キー + fields_display）と
-    スプレッドシート（日本語キー）の両方に対応。
+    UI（画面）で編集された値を最優先で反映するよう列名をマッピングしています。
     """
-    # fields_display が存在する場合はそちらを優先参照
+    # 内部保存用データ（画面に表示されない予備データ等）
     fd = row.get("fields_display", {}) or {}
 
-    # 変更点：取得するキー名を番号付きの新しいキー名に対応させました
-    # 1. 日付
-    raw_date = row.get("5. 日付") if "5. 日付" in row else row.get("date")
+    # 1. 日付 (UI: 7. 注文書年月日(発注日))
+    raw_date = row.get("7. 注文書年月日(発注日)") or fd.get("no7_date") or row.get("date")
     iso_date = _iso_date_from_cell(raw_date)
 
-    # 2. 会社名
+    # 2. 会社名 (UI: 1. 元請名所)
     moto_name = str(
+        row.get("1. 元請名所") or
         fd.get("no1_company") or
-        row.get("1. 元請名") or
         row.get("company") or
         "不明"
     )
+    client_id = resolve_client_id(moto_name)
 
-    # 3. 工事名・現場名
-    raw_site    = fd.get("no3_site_name") or row.get("site_name") or ""
-    raw_content = fd.get("no6_content") or row.get("3. 内容/工事名") or row.get("content") or "名称未設定"
+    # 3. 工事名・現場名 (UI: 3. 現場名(事業名), 3-1. 工事名(邸名), 6. 工事件名(内容/名称))
+    raw_site    = row.get("3. 現場名(事業名)") or row.get("3-1. 工事名(邸名)") or fd.get("no3_site_name") or ""
+    raw_content = row.get("6. 工事件名(内容/名称)") or fd.get("no6_content") or "名称未設定"
 
     # 現場名と工事件名が別の場合は結合
     if raw_site and raw_site not in raw_content:
@@ -147,21 +146,21 @@ def insert_fine_row(
         name = str(raw_content)
 
     # 4. 番号類
-    code_no1 = str(fd.get("no2_id")     or row.get("2. 工事番号(id)") or row.get("id")          or "")
-    code_no2 = str(fd.get("no2_1_code2") or row.get("8. 枝番/バーコード") or row.get("client_code2") or "")
-    code_no3 = str(fd.get("no2_2_code3") or row.get("9. 発注枝番")     or row.get("client_code3") or "")
+    code_no1 = str(row.get("2. 契約番号(注文/工事)") or fd.get("no2_id") or "")
+    code_no2 = str(row.get("2-1. 契約枝番号(業者NO)") or fd.get("no2_1_code2") or "")
+    code_no3 = str(row.get("2-2. 発注枝番") or fd.get("no2_2_code3") or "")
 
     # 5. 住所・金額・工期
-    site_address = str(fd.get("no4_address") or row.get("7. 現場住所") or row.get("address") or "")
+    site_address = str(row.get("4. 施工場所(現場住所)") or fd.get("no4_address") or "")
     budget = _to_float_amount(
-        fd.get("no5_amount") or row.get("4. 金額") or row.get("amount")
+        row.get("5. 代金(金額)") or fd.get("no5_amount") or 0
     )
 
-    raw_end = row.get("6. 工期/納期") if "6. 工期/納期" in row else row.get("endDate")
-    db_end = _db_end_date_from_k(raw_end) if "6. 工期/納期" in row else raw_end
+    raw_end = row.get("8. 工期") or fd.get("no8_kouki")
+    db_end = _db_end_date_from_k(raw_end) if raw_end else None
 
     # 6. 書類タイプ
-    doc_type  = fd.get("no10_doc_type") or row.get("10. 書類種別") or row.get("docType") or ""
+    doc_type  = row.get("10. 注文書種類") or fd.get("no10_doc_type") or ""
     order_desc = f"【{doc_type}】 {name}" if doc_type and doc_type != "注文書" else name
 
     # --- DB登録 ---
@@ -180,7 +179,7 @@ def insert_fine_row(
     proj_data = getattr(proj_res, "data", None) or []
     if not proj_data:
         raise RuntimeError("案件（projects）の作成に失敗しました。")
-    new_project_id = proj_data["id"]
+    new_project_id = proj_data["id"] # リストアクセスエラー修正
 
     order_body: dict[str, Any] = {
         "project_id": new_project_id,
@@ -197,7 +196,7 @@ def insert_fine_row(
     order_data = getattr(order_res, "data", None) or []
     if not order_data:
         raise RuntimeError("注文（orders）の作成に失敗しました。")
-    new_order_id = order_data["id"]
+    new_order_id = order_data["id"] # リストアクセスエラー修正
 
     item_body: dict[str, Any] = {
         "order_id": new_order_id,
