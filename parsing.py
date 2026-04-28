@@ -4,15 +4,6 @@ Supabase連動による動的項目抽出対応版（アイ工務店対応）
 宮崎工務店・宮崎・新生建設 対応追加版
 グローブホーム 専用パーサー追加版
 全9社対応・共通辞書（COMPANY_LABEL_MAP）統合・住所抽出強化版
-
-【修正内容】
-- parse_ai: インボイス番号(T始まり)を除外、13桁バーコードのみid抽出
-- parse_ai: content に明細ヘッダーゴミが混入する問題を修正（工事名ラベルから直接取得）
-- parse_ai: site_name / content を明確に分離（site_name=工事名、content=明細名称）
-- parse_universal: アイ工務店の content 抽出をスキップ（parse_aiに委譲）
-- _normalize_text: 「様邸様邸」重複を修正
-- extract_amount: アイ工務店の税込合計行を優先取得
-- parse_ocr_text の返却辞書に表示用フィールド(fields_display)を追加
 """
 from __future__ import annotations
 import re
@@ -169,7 +160,7 @@ def resolve_client_id(moto_name: str) -> str:
 
 def _slash_to_fmt(s: str) -> str:
     parts = s.split("/")
-    return _fmt(parts[0], parts[1], parts[2])
+    return _fmt(parts, parts, parts)
 
 # =========================
 # Normalize
@@ -305,11 +296,11 @@ def extract_dates_perfect(t: str, tight: str, company: str, labels: dict = {}) -
             result["startDate"] = _slash_to_fmt(kouji_block.group(1))
             result["endDate"]   = _slash_to_fmt(kouji_block.group(2))
         elif len(all_dates) >= 2:
-            result["startDate"] = _slash_to_fmt(all_dates[0])
+            result["startDate"] = _slash_to_fmt(all_dates)
             result["endDate"]   = _slash_to_fmt(all_dates[-1])
         elif len(all_dates) == 1:
-            result["startDate"] = _slash_to_fmt(all_dates[0])
-            result["endDate"]   = _slash_to_fmt(all_dates[0])
+            result["startDate"] = _slash_to_fmt(all_dates)
+            result["endDate"]   = _slash_to_fmt(all_dates)
 
         order_date_m = re.search(r"⑧注文請書\s*(\d{4}/\d{1,2}/\d{1,2})", t)
         if not order_date_m: order_date_m = re.search(r"⑦注文書[^\d]{0,30}(\d{4}/\d{1,2}/\d{1,2})", t)
@@ -358,13 +349,13 @@ def extract_dates_perfect(t: str, tight: str, company: str, labels: dict = {}) -
 
     single = [(y, m, d) for y, m, d in re.findall(r"(20\d{2})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})", t) if _is_valid_date(y, m, d)]
     if len(single) == 1:
-        y, m, d = single[0]
+        y, m, d = single
         dstr = _fmt(y, m, d)
         if not result["date"]: result["date"] = dstr
         result["startDate"] = dstr
         result["endDate"] = dstr
     elif len(single) >= 2:
-        y1, m1, d1 = single[0]
+        y1, m1, d1 = single
         y2, m2, d2 = single[-1]
         if not result["date"]: result["date"] = _fmt(y1, m1, d1)
         result["startDate"] = _fmt(y1, m1, d1)
@@ -373,7 +364,7 @@ def extract_dates_perfect(t: str, tight: str, company: str, labels: dict = {}) -
     if not result["date"] or not result["startDate"]:
         reiwa_dates = re.findall(r"(?:令和|R)(\d{1,2}|元)[年/.](\d{1,2})[月/.](\d{1,2})", tight)
         if reiwa_dates:
-            ry_str, m, d = reiwa_dates[0]
+            ry_str, m, d = reiwa_dates
             ry = 1 if ry_str == "元" else int(ry_str)
             dstr = _fmt(2018 + ry, m, d)
             if not result["date"]: result["date"] = dstr
@@ -443,12 +434,12 @@ def parse_universal(t: str, tight: str, result: dict, company: str):
             nums = re.findall(r"\d{13}", tight)
             valid_nums = [n for n in nums if not n.startswith("202") and not n.startswith("0")]
             if valid_nums:
-                result["id"] = valid_nums[0]
+                result["id"] = valid_nums
             else:
                 nums = re.findall(r"(?<![T\d])\d{8,12}(?!\d)", tight)
                 valid_nums = [n for n in nums if not n.startswith("202") and not n.startswith("0")]
                 if valid_nums:
-                    result["id"] = valid_nums[0]
+                    result["id"] = valid_nums
         else:
             m_id = re.search(f"{re.escape(lbl_id)}\\s*([A-Za-z0-9\\-]+)", t)
             if not m_id: m_id = re.search(f"{re.escape(lbl_id)}([A-Za-z0-9\\-]+)", tight)
@@ -563,7 +554,7 @@ def parse_abe(t: str, tight: str, result: dict):
         nums = re.findall(r"\d{7,10}", tight_fixed)
         exclude_ids = {str(result.get("amount", "")), "4550004", "4550825"}
         candidates = [n for n in nums if n not in exclude_ids and not n.startswith("202") and not n.startswith("090") and not n.startswith("080")]
-        if candidates: result["id"] = candidates[0]
+        if candidates: result["id"] = candidates
 
     m_code = re.search(f"{label_no1}[^\\d]*(\\d{{4,10}})", tight_fixed)
     if m_code: result["client_code3"] = m_code.group(1)
@@ -634,14 +625,14 @@ def parse_ai(t: str, tight: str, result: dict):
         valid = [n for n in barcodes_13
                  if not n.startswith("202") and not n.startswith("0")]
         if valid:
-            result["id"] = valid[0]
+            result["id"] = valid
         else:
             # 8〜12桁にフォールバック（ただし直前にTがある番号は除外）
             barcodes_other = re.findall(r"(?<![T\d])\d{8,12}(?!\d)", tight)
             valid = [n for n in barcodes_other
                      if not n.startswith("202") and not n.startswith("0")]
             if valid:
-                result["id"] = valid[0]
+                result["id"] = valid
 
     # 2. client_code2: 業者NO
     if not result.get("client_code2"):
@@ -664,7 +655,7 @@ def parse_ai(t: str, tight: str, result: dict):
         if m_meisai:
             raw = m_meisai.group(2).strip()
             # 仕様・数量などのノイズ列を除去
-            raw = re.split(r"\s{2,}|\t", raw)[0].strip()
+            raw = re.split(r"\s{2,}|\t", raw).strip()
             if len(raw) >= 3:
                 result["content"] = raw
 
