@@ -6,6 +6,7 @@ Supabase連動による動的項目抽出対応版（アイ工務店対応）
 全9社対応・共通辞書（COMPANY_LABEL_MAP）統合・住所抽出強化版
 
 【修正内容】
+- _slash_to_fmt: parts, parts, parts を渡すように修正 (TypeErrorの解決)
 - parse_ai: インボイス番号(T始まり)を除外、13桁バーコードのみid抽出
 - parse_ai: content に明細ヘッダーゴミが混入する問題を修正（工事名ラベルから直接取得）
 - parse_ai: site_name / content を明確に分離（site_name=工事名、content=明細名称）
@@ -167,6 +168,7 @@ def resolve_client_id(moto_name: str) -> str:
             return val
     return DEFAULT_CLIENT_ID
 
+# 【修正箇所】リストの各要素をインデックスで渡すように修正済み
 def _slash_to_fmt(s: str) -> str:
     parts = s.split("/")
     if len(parts) == 3:
@@ -225,7 +227,6 @@ def _normalize_text(text: str) -> str:
 # 金額抽出
 # =========================
 def extract_amount(t: str, tight: str) -> int:
-    # 【修正】アイ工務店: 「合計」最終行（税込合計）を最優先
     ai_top = re.search(r"合計\s*([0-9,]{4,10})\s*$", t, re.MULTILINE)
     if ai_top:
         val = _num(ai_top.group(1))
@@ -323,7 +324,6 @@ def extract_dates_perfect(t: str, tight: str, company: str, labels: dict = {}) -
             else: result["date"] = _slash_to_fmt(all_dates[-1])
         return result
 
-    # 宮崎・新生建設系: 「自 YYYY年MM月DD日 至 YYYY年MM月DD日」を優先処理
     kouji_m = re.search(
         r"[自从]\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*[至迄]\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
         t
@@ -340,7 +340,6 @@ def extract_dates_perfect(t: str, tight: str, company: str, labels: dict = {}) -
     if result["startDate"]:
         return result
 
-    # スラッシュ区切り工期（アイ工務店形式: 2025/12/18～2026/05/16）
     kouji_slash = re.search(
         r"工\s*[　 ]*期\s*[　 ]*(\d{4}/\d{1,2}/\d{1,2})\s*[~～〜\-]\s*(\d{4}/\d{1,2}/\d{1,2})",
         t
@@ -681,24 +680,19 @@ def parse_globe(t: str, tight: str, result: dict):
     if m_contract: result["id"] = re.sub(r"[^0-9\-]", "", m_contract.group(1).strip())
 
 # =========================
-# 表示用フィールド生成（1〜10の枠表示用）
+# 表示用フィールド生成
 # =========================
 def build_display_fields(result: dict) -> dict:
     def _v(val):
-        if val is None: return None
+        if val is None or val in ("-", "", "注文工事"): return None
         if isinstance(val, int) and val == 0: return None
-        if isinstance(val, str) and val in ("-", "", "注文工事"): return None
         return str(val)
-
     def _date_range(s, e):
         if s and e and s != e: return f"{s} 〜 {e}"
-        if s: return s
-        return None
-
+        return s if s else None
     def _amount_fmt(v):
         if not v or v == 0: return None
         return f"¥ {int(v):,}"
-
     return {
         "no1_company":      _v(result.get("company")),
         "no2_id":           _v(result.get("id")),
@@ -721,37 +715,17 @@ def build_display_fields(result: dict) -> dict:
 def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     t = _normalize_text(text)
     tight = _tight(t)
-
     result: dict[str, Any] = {
-        "company": "不明",
-        "date": None,
-        "startDate": None,
-        "endDate": None,
-        "billing_date": None,
-        "id": None,
-        "client_code2": None,
-        "client_code3": None,
-        "address": "-",
-        "content": "注文工事",
-        "site_name": None,
-        "amount": 0,
-        "docType": "注文書",
-        "config": {},
-        "contract_no": None,
-        "project_no": None,
-        "order_no": None,
-        "kouji_code": None,
-        "order_branch": None,
-        "delivery_id": None,
-        "biz_name": None
+        "company": "不明", "date": None, "startDate": None, "endDate": None,
+        "billing_date": None, "id": None, "client_code2": None, "client_code3": None,
+        "address": "-", "content": "注文工事", "site_name": None, "amount": 0, "docType": "注文書",
+        "contract_no": None, "project_no": None, "order_no": None, "kouji_code": None,
+        "order_branch": None, "delivery_id": None, "biz_name": None
     }
-
     company = _detect_company(t, tight, file_name)
     result["company"] = company
-
     config = get_client_config(company)
-    result["config"] = config
-
+    
     result["contract_no"] = dynamic_extract(config.get("label_contract_no"), tight)
     result["project_no"]  = dynamic_extract(config.get("label_project_no"), tight)
     result["order_no"]    = dynamic_extract(config.get("label_order_no"), tight)
@@ -776,10 +750,8 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     code_e = re.search(r"(E[0-9]{5})", tight)
     if code_e: result["client_code2"] = code_e.group(0)
 
-    # 汎用パーサー（辞書ベース）
     parse_universal(t, tight, result, company)
 
-    # 会社別専用パーサー
     if company == "ファースト住建":
         parse_first(t, tight, result)
     elif company == "阿部建設":
@@ -809,7 +781,6 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     if "浄水槽" in t and result["content"] == "注文工事":
         result["content"] = "浄水槽工事"
 
-    # 表示用フィールドを付加
     result["fields_display"] = build_display_fields(result)
 
     result.pop("config", None)
