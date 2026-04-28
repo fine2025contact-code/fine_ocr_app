@@ -198,27 +198,32 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
     else:
         kouki = ed or sd or "-"
 
+    # 変更点：各社の呼び方を併記して分かりやすくしました
     return {
         "送信": False,
         "ファイル名": filename,
-        "日付": parsed.get("date") or "-",
-        "工事番号(id)": parsed.get("id") or "-",
-        "元請名": parsed.get("company") or "不明",
-        "現場住所": parsed.get("address") or "-",
-        "内容/工事名": parsed.get("content") or "不明",
-        "工期/納期": kouki,
-        "金額": int(amt) if isinstance(amt, (int, float)) else amt,
+        "1. 元請名所": parsed.get("company") or "不明",
+        "2. 契約番号(注文/工事)": parsed.get("id") or "-",
+        "2-1. 契約枝番号(業者NO)": parsed.get("client_code2") or "",
+        "2-2. 発注枝番": parsed.get("client_code3") or "",
+        "3. 現場名(事業名)": parsed.get("site_name") or "-",
+        "3-1. 工事名(邸名)": parsed.get("site_name") or "-",
+        "4. 施工場所(現場住所)": parsed.get("address") or "-",
+        "5. 代金(金額)": int(amt) if isinstance(amt, (int, float)) else amt,
+        "6. 工事件名(内容/名称)": parsed.get("content") or "不明",
+        "7. 注文書年月日(発注日)": parsed.get("date") or "-",
+        "8. 工期": kouki,
+        "9. 請求日": parsed.get("billing_date") or "",
+        "10. 注文書種類": parsed.get("docType") or "注文書",
         "注文No(F18)": "-",
         "ステータス": "未送信",
-        "枝番/バーコード": parsed.get("client_code2") or "",
-        "発注枝番": parsed.get("client_code3") or "",
-        "書類種別": parsed.get("docType") or "注文書",
+        "fields_display": parsed.get("fields_display", {})  # 内部保存用のデータも保持
     }
 
-# 表示列の定義
+# 変更点：表示列の定義を番号付き・併記のキー名に合わせて修正
 EDITOR_COLUMNS = [
-    "送信", "ファイル名", "元請名", "内容/工事名", "金額", 
-    "日付", "工期/納期", "現場住所", "工事番号(id)", "注文No(F18)", "ステータス"
+    "送信", "ファイル名", "1. 元請名所", "2. 契約番号(注文/工事)", "2-1. 契約枝番号(業者NO)", "2-2. 発注枝番", 
+    "3. 現場名(事業名)", "3-1. 工事名(邸名)", "4. 施工場所(現場住所)", "5. 代金(金額)", "6. 工事件名(内容/名称)", "7. 注文書年月日(発注日)", "8. 工期", "9. 請求日", "10. 注文書種類", "注文No(F18)", "ステータス"
 ]
 
 # --- 4. メインアプリケーション ---
@@ -365,9 +370,10 @@ def main() -> None:
             df[EDITOR_COLUMNS],
             use_container_width=True,
             num_rows="dynamic",
+            # 変更点：代金のキー名を併記フォーマットに変更
             column_config={
                 "送信": st.column_config.CheckboxColumn("送信", default=False),
-                "金額": st.column_config.NumberColumn("金額", format="¥%d"),
+                "5. 代金(金額)": st.column_config.NumberColumn("5. 代金(金額)", format="¥%d"),
                 "ステータス": st.column_config.SelectboxColumn(
                     "ステータス", options=["未送信", "完了", "エラー"], disabled=True
                 )
