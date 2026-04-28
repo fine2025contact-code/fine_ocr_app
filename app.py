@@ -123,7 +123,7 @@ st.markdown("""
     
     /* サイドバーのカスタマイズ */
     section[data-testid="stSidebar"] {
-        background-color: #1e293b;
+        background-color: #228b22;
         color: white;
     }
     /* 使い方セクションの文字を白にする */
@@ -166,6 +166,7 @@ def _get_supabase() -> Client | None:
     except Exception as e:
         st.sidebar.error(f"接続エラー詳細: {e}")
         return None
+
 def extract_pdf_text_local(file_bytes: bytes, filename: str) -> str:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     full_text_list: list[str] = []
@@ -236,6 +237,7 @@ def main() -> None:
             else:
                 st.error("パスワードが正しくありません")
         return  # 認証されるまでこれ以降のコード（OCR画面）は実行しない
+
     # 状態の初期化
     if "fine_rows" not in st.session_state:
         st.session_state.fine_rows = []
@@ -350,6 +352,15 @@ def main() -> None:
     tab1, tab2 = st.tabs(["📋 データ編集・送信", "📄 抽出テキスト確認"])
 
     with tab1:
+        # ★ ここに大きな警告テキストを追加しました ★
+        st.markdown("""
+            <div style="background-color: #fee2e2; border-left: 6px solid #ef4444; padding: 1rem; margin-bottom: 1rem; border-radius: 0.5rem;">
+                <p style="color: #b91c1c; font-size: 1.35rem; font-weight: bold; margin: 0;">
+                    ⚠️ ※必ず読み込み結果を目視で確認してから同期してください。
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+
         edited_df = st.data_editor(
             df[EDITOR_COLUMNS],
             use_container_width=True,
