@@ -7,6 +7,9 @@ Supabase連動による動的項目抽出対応版（アイ工務店対応）
 
 【修正内容】
 - parse_ai: インボイス番号(T始まり)を除外、13桁バーコードのみid抽出
+- parse_ai: content に明細ヘッダーゴミが混入する問題を修正（工事名ラベルから直接取得）
+- parse_ai: site_name / content を明確に分離（site_name=工事名、content=明細名称）
+- parse_universal: アイ工務店の content 抽出をスキップ（parse_aiに委譲）
 - _normalize_text: 「様邸様邸」重複を修正
 - extract_amount: アイ工務店の税込合計行を優先取得
 - parse_ocr_text の返却辞書に表示用フィールド(fields_display)を追加
