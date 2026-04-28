@@ -275,16 +275,16 @@ def main() -> None:
         st.markdown("---")
         st.markdown("""
             <div style="font-size: 1.45rem; font-weight: 800; color: #ffffff; line-height: 1.4; margin-top: 10px; letter-spacing: 0.05rem;">
-                FINE㈱<br>
-                PDF注文書<br>
-                抽出システム
+                ㈱FINE<br>
+                元請注文書<br>
+                読み込みシステム
             </div>
         """, unsafe_allow_html=True)
 
     # タイトル部分にインラインで水道ロゴを配置、タイトル名を変更
     st.markdown("""
         <div class="main-header">
-            PDF注文書 抽出システム
+            元請注文書読み込みシステム
             <div class="header-faucet-wrapper">
                 <span class="header-faucet-icon">🚰</span>
                 <div class="header-water-drop"></div>

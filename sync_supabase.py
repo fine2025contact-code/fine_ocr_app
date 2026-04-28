@@ -2,6 +2,7 @@
 GAS processSingleRowToSupabase / sendCheckedRows に相当する Supabase 同期。
 projects → orders → order_items の順で挿入し、F18 の採番を行う。
 ※最新のOCR抽出辞書（site_name, billing_date, docType等）対応版
+※fields_display（1〜10表示項目）対応版
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ def _parse_f18_counter(last_no: str | None) -> int:
 
 
 def get_max_f18_counter(supabase: Client) -> int:
-    """DB 上の F18* の最大番号に対応するカウンタ（GAS の maxNumFromDB）。"""
+    """DB上の F18* の最大番号に対応するカウンタ"""
     try:
         res = (
             supabase.table("orders")
@@ -38,7 +39,7 @@ def get_max_f18_counter(supabase: Client) -> int:
         )
         data = getattr(res, "data", None) or []
         if isinstance(data, list) and len(data) > 0:
-            return _parse_f18_counter(data.get("order_custom_no"))
+            return _parse_f18_counter(data[0].get("order_custom_no"))
     except Exception:
         pass
     return 0
@@ -57,7 +58,7 @@ def f18_exists(supabase: Client, f18: str) -> bool:
 
 
 def next_unique_f18(supabase: Client, start_counter: int) -> tuple[str, int]:
-    """F18 + 下4桁（GAS: 'F18' + ('0000'+counter).slice(-4)）で重複しない番号を返す。"""
+    """F18 + 下4桁で重複しない番号を返す"""
     c = start_counter
     while True:
         c += 1
@@ -72,7 +73,7 @@ def _to_float_amount(v: Any) -> float:
         return 0.0
     if isinstance(v, (int, float)):
         return float(v)
-    s = str(v).replace(",", "").replace("，", "")
+    s = str(v).replace(",", "").replace("，", "").replace("¥", "").replace("￥", "").replace(" ", "")
     try:
         return float(s)
     except ValueError:
@@ -97,7 +98,7 @@ def _iso_date_from_cell(val: Any) -> str:
 
 
 def _db_end_date_from_k(val: Any) -> str | None:
-    """K列（工期/納期）から end_date 用の日付文字列を推定（GAS と同様に最後の日付を採用）。"""
+    """工期/納期から end_date 用の日付文字列を推定（最後の日付を採用）"""
     t = str(val) if val is not None else ""
     if not t.strip() or t.strip() == "-":
         return None
@@ -116,44 +117,54 @@ def insert_fine_row(
 ) -> None:
     """
     1行を projects / orders / order_items に登録。
-    ※OCRからの直接連携（英語キー）と、スプレッドシート（日本語キー）の両方に対応。
+    OCRからの直接連携（英語キー + fields_display）と
+    スプレッドシート（日本語キー）の両方に対応。
     """
-    # 1. 日付系の取得
-    # スプレッドシートの「日付」またはOCRの「date」
+    # fields_display が存在する場合はそちらを優先参照
+    fd = row.get("fields_display", {}) or {}
+
+    # 1. 日付
     raw_date = row.get("日付") if "日付" in row else row.get("date")
     iso_date = _iso_date_from_cell(raw_date)
-    
-    # 2. 会社名の取得
-    moto_name = str(row.get("元請名") or row.get("company") or "不明")
+
+    # 2. 会社名
+    moto_name = str(
+        fd.get("no1_company") or
+        row.get("元請名") or
+        row.get("company") or
+        "不明"
+    )
     client_id = resolve_client_id(moto_name)
 
-    # 3. 名称系の取得（現場名と工事件名を統合して綺麗な名前にする）
-    raw_site = row.get("site_name") or ""
-    raw_content = row.get("内容/工事名") or row.get("content") or "名称未設定"
-    
-    # 現場名(site_name)があれば「現場名：工事内容」のフォーマットにする
+    # 3. 工事名・現場名
+    raw_site    = fd.get("no3_site_name") or row.get("site_name") or ""
+    raw_content = fd.get("no6_content") or row.get("内容/工事名") or row.get("content") or "名称未設定"
+
+    # 現場名と工事件名が別の場合は結合
     if raw_site and raw_site not in raw_content:
         name = f"{raw_site} {raw_content}".strip()
     else:
         name = str(raw_content)
 
-    # 4. ID・枝番系の取得
-    code_no1 = str(row.get("工事番号(id)") or row.get("id") or "")
-    code_no2 = str(row.get("枝番/バーコード") or row.get("client_code2") or "")
-    code_no3 = str(row.get("発注枝番") or row.get("client_code3") or "")
+    # 4. 番号類
+    code_no1 = str(fd.get("no2_id")     or row.get("工事番号(id)") or row.get("id")          or "")
+    code_no2 = str(fd.get("no2_1_code2") or row.get("枝番/バーコード") or row.get("client_code2") or "")
+    code_no3 = str(fd.get("no2_2_code3") or row.get("発注枝番")     or row.get("client_code3") or "")
 
-    # 5. 住所・金額・工期の取得
-    site_address = str(row.get("現場住所") or row.get("address") or "")
-    budget = _to_float_amount(row.get("金額") or row.get("amount"))
-    
+    # 5. 住所・金額・工期
+    site_address = str(fd.get("no4_address") or row.get("現場住所") or row.get("address") or "")
+    budget = _to_float_amount(
+        fd.get("no5_amount") or row.get("金額") or row.get("amount")
+    )
+
     raw_end = row.get("工期/納期") if "工期/納期" in row else row.get("endDate")
     db_end = _db_end_date_from_k(raw_end) if "工期/納期" in row else raw_end
 
-    # 6. B表などの書類タイプ（もしあれば orders の description 等に追記）
-    doc_type = row.get("docType") or ""
+    # 6. 書類タイプ
+    doc_type  = fd.get("no10_doc_type") or row.get("docType") or ""
     order_desc = f"【{doc_type}】 {name}" if doc_type and doc_type != "注文書" else name
 
-    # --- DB登録処理開始 ---
+    # --- DB登録 ---
     project_body: dict[str, Any] = {
         "name": name,
         "client_id": client_id,
@@ -169,7 +180,7 @@ def insert_fine_row(
     proj_data = getattr(proj_res, "data", None) or []
     if not proj_data:
         raise RuntimeError("案件（projects）の作成に失敗しました。")
-    new_project_id = proj_data["id"]
+    new_project_id = proj_data[0]["id"]
 
     order_body: dict[str, Any] = {
         "project_id": new_project_id,
@@ -178,7 +189,7 @@ def insert_fine_row(
         "client_code1": code_no1,
         "client_code2": code_no2,
         "client_code3": code_no3,
-        "description": order_desc, # ここにB表などの情報が入ります
+        "description": order_desc,
         "status": "active",
     }
 
@@ -186,7 +197,7 @@ def insert_fine_row(
     order_data = getattr(order_res, "data", None) or []
     if not order_data:
         raise RuntimeError("注文（orders）の作成に失敗しました。")
-    new_order_id = order_data["id"]
+    new_order_id = order_data[0]["id"]
 
     item_body: dict[str, Any] = {
         "order_id": new_order_id,
