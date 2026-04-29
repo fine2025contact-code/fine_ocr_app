@@ -692,9 +692,10 @@ def parse_ai(t: str, tight: str, result: dict):
 def parse_miyazaki_shinsei(t: str, tight: str, result: dict):
     """宮崎工務店・(株)宮崎・新生建設 共通帳票パーサー"""
     # 注文番号(例: T2511-7-26) → id
-    m_order = re.search(r"注文番号[\s:：]*(T\d{4}[-－]\d{1,2}[-－]\d{1,2})", t)
+    # OCRノイズ対応: T+数字-数字-数字 の形式を柔軟に取得
+    m_order = re.search(r"注文番号[\s:：]*([Tt][0-9]{3,6}[-－][0-9]{1,2}[-－][0-9]{1,2})", t)
     if m_order:
-        result["id"] = m_order.group(1).replace("－", "-")
+        result["id"] = m_order.group(1).upper().replace("－", "-")
 
     # 工事番号(例: 25107083) → client_code2
     m_kojino = re.search(r"工事番号[\s:：]*(\d{7,10})", t)
@@ -718,12 +719,19 @@ def parse_miyazaki_shinsei(t: str, tight: str, result: dict):
         result["startDate"] = _fmt(m_kouji.group(1), m_kouji.group(2), m_kouji.group(3))
         result["endDate"]   = _fmt(m_kouji.group(4), m_kouji.group(5), m_kouji.group(6))
 
-    # 注文金額: ¥16,500- の末尾ハイフンを除去してから数値化
-    m_amt = re.search(r"注文金額[\s¥￥\\]*([0-9,]+)-?", tight)
-    if m_amt:
-        val = _num(m_amt.group(1))
+    # 注文金額: ¥マーク直後の数値を取得（OCRが¥416,500-と読んでも¥16,500-と読んでも対応）
+    # 「注文金額」ラベル直後のYen記号+数値パターンを優先
+    m_amt_yen = re.search(r"注文金額[\s]*[¥￥\\]([0-9,]+)-?", t)
+    if m_amt_yen:
+        val = _num(m_amt_yen.group(1))
         if 1000 <= val <= 9_000_000:
             result["amount"] = val
+    else:
+        m_amt = re.search(r"注文金額[\s¥￥\\]*([0-9,]+)-?", tight)
+        if m_amt:
+            val = _num(m_amt.group(1))
+            if 1000 <= val <= 9_000_000:
+                result["amount"] = val
 
 
 def parse_globe(t: str, tight: str, result: dict):
@@ -904,10 +912,15 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
         if m: result["id"] = m.group(2)
 
     if not result["id"]:
+        # 登録番号(T+13桁)の数字部分は除外
+        reg_nos = set(re.findall(r"登録番号[：:]*T?(\d{10,13})", tight))
         for ic in re.findall(r"[0-9]{7}", tight):
-            if ic not in [str(result["amount"]), "4550004"]:
-                result["id"] = ic
-                break
+            skip = {str(result["amount"]), "4550004"}
+            # 登録番号の数字を含む場合はスキップ
+            if ic in skip or any(ic in rn for rn in reg_nos):
+                continue
+            result["id"] = ic
+            break
 
     if "浄水槽" in t and result["content"] == "注文工事":
         result["content"] = "浄水槽工事"
