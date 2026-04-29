@@ -559,16 +559,53 @@ def parse_sumitomo(t: str, tight: str, result: dict):
 
 
 def parse_first(t: str, tight: str, result: dict):
-    biz_m = re.search(r"事業名.*?(\d{6,10})", tight)
-    if biz_m: result["id"] = biz_m.group(1)
-    else:
-        for i8 in re.findall(r"(\d{8})", tight):
-            if not i8.startswith("202"): result["id"] = i8; break
-    content_m = re.search(r"細目工種[\s\n:：]*([^\n]{2,30})(?:\n([^\n]{2,30}))?", t)
-    if content_m:
-        line1, line2 = content_m.group(1).strip(), content_m.group(2).strip() if content_m.group(2) else ""
-        if line2 and not any(k in line2 for k in ["所在地", "備考", "工期", "発行日"]): result["content"] = f"{line1} {line2}".strip()
-        else: result["content"] = line1
+    """ファースト住建 専用パーサー
+    2. id       = [ 0005184 ] の番号（角括弧内）
+    2-1. code2  = 事業名欄の番号（例: 27004500）
+    3. site_name = 事業名の名称（例: 豊明市第７二村台）
+    6. content  = 細目工種（例: 舗装復旧）
+    10. docType = 発注伝票Ｎｏ（CH-212781）→ idの代わりにclient_code3へ
+    """
+    # 2. id: [ 0005184 ] の角括弧内番号
+    m_bracket = re.search(r"\[\s*(\d{4,10})\s*\]", t)
+    if m_bracket:
+        result["id"] = m_bracket.group(1)
+
+    # 2-1. client_code2: 事業名欄の数字番号（例: 27004500）
+    m_biz_no = re.search(r"事業名\s*(\d{6,10})", t)
+    if m_biz_no:
+        result["client_code2"] = m_biz_no.group(1)
+
+    # 3. site_name: 事業名の名称テキスト（数字の後ろ）
+    m_biz_name = re.search(r"事業名\s*\d{6,10}\s*([^\n]{2,30})", t)
+    if m_biz_name:
+        raw = m_biz_name.group(1).strip()
+        # 「発注伝票No」等が続く場合は切る
+        for stop in ["発注伝票", "工事名", "細目", "所在地", "発注日"]:
+            if stop in raw: raw = raw[:raw.index(stop)].strip()
+        if len(raw) >= 2:
+            result["site_name"] = raw
+
+    # 3-1. 工事名（細目工種）→ content
+    m_content = re.search(r"細目工種\s*([^\n]{2,30})", t)
+    if m_content:
+        result["content"] = m_content.group(1).strip()
+
+    # 発注伝票Noはdocに格納（画面10番）
+    m_denno = re.search(r"発注伝票[ＮN][ｏo]\s*([A-Za-z0-9\-]{4,20})", t)
+    if m_denno:
+        result["docType"] = m_denno.group(1).strip()
+
+    # 工期: 令和表記に対応（extract_dates_perfectの令和処理を補完）
+    # 「令和7年9月8日 ～ 令和7年9月8日」
+    m_kouki = re.search(
+        r"(?:令和|R)(\d{1,2}|元)年(\d{1,2})月(\d{1,2})日\s*[～~〜]\s*(?:令和|R)(\d{1,2}|元)年(\d{1,2})月(\d{1,2})日",
+        t
+    )
+    if m_kouki:
+        def reiwa(y): return 2018 + (1 if y == "元" else int(y))
+        result["startDate"] = _fmt(reiwa(m_kouki.group(1)), m_kouki.group(2), m_kouki.group(3))
+        result["endDate"]   = _fmt(reiwa(m_kouki.group(4)), m_kouki.group(5), m_kouki.group(6))
 
 
 def parse_abe(t: str, tight: str, result: dict):
