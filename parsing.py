@@ -691,13 +691,15 @@ def parse_ai(t: str, tight: str, result: dict):
 
 def parse_miyazaki_shinsei(t: str, tight: str, result: dict):
     """宮崎工務店・(株)宮崎・新生建設 共通帳票パーサー"""
+    # 注文番号(例: T2511-7-26) → id
     m_order = re.search(r"注文番号[\s:：]*(T\d{4}[-－]\d{1,2}[-－]\d{1,2})", t)
     if m_order:
-        result["client_code3"] = m_order.group(1).replace("－", "-")
+        result["id"] = m_order.group(1).replace("－", "-")
 
+    # 工事番号(例: 25107083) → client_code2
     m_kojino = re.search(r"工事番号[\s:：]*(\d{7,10})", t)
     if m_kojino:
-        result["id"] = m_kojino.group(1)
+        result["client_code2"] = m_kojino.group(1)
 
     m_content = re.search(r"工事名称[\s:：]*([^\n]{4,80})", t)
     if m_content:
@@ -716,7 +718,8 @@ def parse_miyazaki_shinsei(t: str, tight: str, result: dict):
         result["startDate"] = _fmt(m_kouji.group(1), m_kouji.group(2), m_kouji.group(3))
         result["endDate"]   = _fmt(m_kouji.group(4), m_kouji.group(5), m_kouji.group(6))
 
-    m_amt = re.search(r"注文金額[\s¥￥\\]*([0-9,]+)", tight)
+    # 注文金額: ¥16,500- の末尾ハイフンを除去してから数値化
+    m_amt = re.search(r"注文金額[\s¥￥\\]*([0-9,]+)-?", tight)
     if m_amt:
         val = _num(m_amt.group(1))
         if 1000 <= val <= 9_000_000:
@@ -862,8 +865,6 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
         result["docType"] = "B表" if any(k in tight for k in ["B表", "追加", "工程変更"]) else "注文書"
 
     result["amount"] = extract_amount(t, tight)
-    dates = extract_dates_perfect(t, tight, company, COMPANY_LABEL_MAP.get(company, {}))
-    result.update(dates)
     result["address"] = extract_address(t)
 
     id_1p = re.search(r"(1P[0-9]{3,6})", tight)
@@ -874,7 +875,7 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     # 汎用パーサー（辞書ベース）
     parse_universal(t, tight, result, company)
 
-    # 会社別専用パーサー
+    # 会社別専用パーサー（工期・id等を先にセットしてからextract_dates_perfectで補完）
     if company == "ファースト住建":
         parse_first(t, tight, result)
     elif company == "阿部建設":
@@ -887,6 +888,13 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
         parse_miyazaki_shinsei(t, tight, result)
     elif company == "グローブホーム":
         parse_globe(t, tight, result)
+
+    # 専用パーサーでセット済みの日付は上書きせず、未セット分だけ補完
+    dates = extract_dates_perfect(t, tight, company, COMPANY_LABEL_MAP.get(company, {}))
+    if not result["date"]:        result["date"]        = dates.get("date")
+    if not result["startDate"]:   result["startDate"]   = dates.get("startDate")
+    if not result["endDate"]:     result["endDate"]      = dates.get("endDate")
+    if not result["billing_date"]:result["billing_date"] = dates.get("billing_date")
 
     if not result["startDate"] and result["date"]:
         result["startDate"] = result["date"]
