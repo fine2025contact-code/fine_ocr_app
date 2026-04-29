@@ -491,7 +491,7 @@ def parse_universal(t: str, tight: str, result: dict, company: str):
             if len(raw_site) >= 2: result["site_name"] = raw_site
 
     lbl_content = labels.get("content")
-    if lbl_content:
+    if lbl_content and company != "アイ工務店":
         if company in ("新生建設(株)", "(株)宮崎工務店", "(株)宮崎"):
             m_content = re.search(f"{re.escape(lbl_content)}[\\s:：]*([^\\n]{{2,80}})", t)
         else:
@@ -670,13 +670,13 @@ def parse_ai(t: str, tight: str, result: dict):
     # 3. content: 明細名称を抽出
     # PDFの各列は1行ずつ独立: ＮＯ\n名称\n仕様\n...\n備考\n１\n上下水調整工事費\n式\n...
     # 「備考」の直後に連番(１など)、その次が名称
-    if result.get("content") in (None, "注文工事"):
-        m_meisai = re.search(
-            r"備考\n[１-９1-9]\n([^\n]{3,50})\n",
-            t
-        )
-        if m_meisai:
-            result["content"] = m_meisai.group(1).strip()
+    # parse_universalはアイ工務店をスキップするのでここで必ず上書きする
+    m_meisai = re.search(
+        r"備考\n[１-９1-9]\n([^\n]{3,50})\n",
+        t
+    )
+    if m_meisai:
+        result["content"] = m_meisai.group(1).strip()
 
     # 4. site_name: 工事名（「工　事　名」ラベル）
     if not result.get("site_name"):
