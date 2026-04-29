@@ -667,19 +667,24 @@ def parse_ai(t: str, tight: str, result: dict):
             if m_vendor2:
                 result["client_code2"] = m_vendor2.group(1)
 
-    # 3. content: 【修正2】明細のNO.1 名称を抽出（re.split戻り値リストの[0]を取得）
+    # 3. content: 明細ヘッダー行の次行から名称列のみ抽出
+    # 「ＮＯ 名称 仕様 ...」ヘッダーの次行は「上下水調整工事費 1 421,000 ...」形式
+    # 行頭から最初の数字（数量）が現れる手前までを名称とする
     if result.get("content") in (None, "注文工事"):
         m_meisai = re.search(
-            r"(?:ＮＯ|NO)\s*名称.*?(?:\n|\r\n?)(\s*\d+\s+)([^\n]{3,50})",
-            t, re.DOTALL
+            r"(?:ＮＯ|NO)\s*名称[^\n]*\n([^\n]+)",
+            t
         )
         if m_meisai:
-            raw = m_meisai.group(2).strip()
-            # 【修正2】re.split()の戻り値はリストなので[0]で最初の列（名称）のみ取得
-            parts = re.split(r"\s{2,}|\t", raw)
-            raw = parts[0].strip()
-            if len(raw) >= 3:
-                result["content"] = raw
+            line = m_meisai.group(1).strip()
+            # 行頭の連番（例: "1 "）があれば除去
+            line = re.sub(r"^\d+\s+", "", line)
+            # 最初に数字が連続する箇所（数量列）の手前で切る
+            m_cut = re.search(r"\s+\d", line)
+            if m_cut:
+                line = line[:m_cut.start()].strip()
+            if len(line) >= 3:
+                result["content"] = line
 
     # 4. site_name: 工事名（「工　事　名」ラベル）
     if not result.get("site_name"):
