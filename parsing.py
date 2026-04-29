@@ -13,6 +13,11 @@ Supabase連動による動的項目抽出対応版（アイ工務店対応）
 - _normalize_text: 「様邸様邸」重複を修正
 - extract_amount: アイ工務店の税込合計行を優先取得
 - parse_ocr_text の返却辞書に表示用フィールド(fields_display)を追加
+
+【バグ修正 2026-04-29】
+- _slash_to_fmt: parts[0], parts[1], parts[2] のインデックス指定が欠落していたのを修正
+- parse_ai content抽出: re.split()の戻り値がリストのまま.strip()していたのを修正
+- parse_ai id抽出: T始まりインボイス番号(T+13桁)をtight文字列上で確実に除外
 """
 from __future__ import annotations
 import re
@@ -174,9 +179,10 @@ def resolve_client_id(moto_name: str) -> str:
             return val
     return DEFAULT_CLIENT_ID
 
+# 【修正1】_slash_to_fmt: parts のインデックス指定が欠落していたのを修正
 def _slash_to_fmt(s: str) -> str:
     parts = s.split("/")
-    return _fmt(parts, parts, parts)
+    return _fmt(parts[0], parts[1], parts[2])
 
 # =========================
 # Normalize
@@ -312,11 +318,11 @@ def extract_dates_perfect(t: str, tight: str, company: str, labels: dict = {}) -
             result["startDate"] = _slash_to_fmt(kouji_block.group(1))
             result["endDate"]   = _slash_to_fmt(kouji_block.group(2))
         elif len(all_dates) >= 2:
-            result["startDate"] = _slash_to_fmt(all_dates)
+            result["startDate"] = _slash_to_fmt(all_dates[0])
             result["endDate"]   = _slash_to_fmt(all_dates[-1])
         elif len(all_dates) == 1:
-            result["startDate"] = _slash_to_fmt(all_dates)
-            result["endDate"]   = _slash_to_fmt(all_dates)
+            result["startDate"] = _slash_to_fmt(all_dates[0])
+            result["endDate"]   = _slash_to_fmt(all_dates[0])
 
         order_date_m = re.search(r"⑧注文請書\s*(\d{4}/\d{1,2}/\d{1,2})", t)
         if not order_date_m: order_date_m = re.search(r"⑦注文書[^\d]{0,30}(\d{4}/\d{1,2}/\d{1,2})", t)
@@ -365,13 +371,13 @@ def extract_dates_perfect(t: str, tight: str, company: str, labels: dict = {}) -
 
     single = [(y, m, d) for y, m, d in re.findall(r"(20\d{2})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})", t) if _is_valid_date(y, m, d)]
     if len(single) == 1:
-        y, m, d = single
+        y, m, d = single[0]
         dstr = _fmt(y, m, d)
         if not result["date"]: result["date"] = dstr
         result["startDate"] = dstr
         result["endDate"] = dstr
     elif len(single) >= 2:
-        y1, m1, d1 = single
+        y1, m1, d1 = single[0]
         y2, m2, d2 = single[-1]
         if not result["date"]: result["date"] = _fmt(y1, m1, d1)
         result["startDate"] = _fmt(y1, m1, d1)
@@ -380,7 +386,7 @@ def extract_dates_perfect(t: str, tight: str, company: str, labels: dict = {}) -
     if not result["date"] or not result["startDate"]:
         reiwa_dates = re.findall(r"(?:令和|R)(\d{1,2}|元)[年/.](\d{1,2})[月/.](\d{1,2})", tight)
         if reiwa_dates:
-            ry_str, m, d = reiwa_dates
+            ry_str, m, d = reiwa_dates[0]
             ry = 1 if ry_str == "元" else int(ry_str)
             dstr = _fmt(2018 + ry, m, d)
             if not result["date"]: result["date"] = dstr
@@ -446,16 +452,16 @@ def parse_universal(t: str, tight: str, result: dict, company: str):
     lbl_id = labels.get("id")
     if lbl_id:
         if company == "アイ工務店":
-            # 【修正】バーコード(13桁)のみ抽出、T始まりインボイス番号は除外
+            # 【修正3】T始まりインボイス番号(T+13桁)をtight上で確実に除外してバーコード抽出
             nums = re.findall(r"\d{13}", tight)
-            valid_nums = [n for n in nums if not n.startswith("202") and not n.startswith("0")]
+            valid_nums = [n for n in nums if not re.search(r"T" + n, tight) and not n.startswith("202") and not n.startswith("0")]
             if valid_nums:
-                result["id"] = valid_nums
+                result["id"] = valid_nums[0]
             else:
                 nums = re.findall(r"(?<![T\d])\d{8,12}(?!\d)", tight)
                 valid_nums = [n for n in nums if not n.startswith("202") and not n.startswith("0")]
                 if valid_nums:
-                    result["id"] = valid_nums
+                    result["id"] = valid_nums[0]
         else:
             m_id = re.search(f"{re.escape(lbl_id)}\\s*([A-Za-z0-9\\-]+)", t)
             if not m_id: m_id = re.search(f"{re.escape(lbl_id)}([A-Za-z0-9\\-]+)", tight)
@@ -570,7 +576,7 @@ def parse_abe(t: str, tight: str, result: dict):
         nums = re.findall(r"\d{7,10}", tight_fixed)
         exclude_ids = {str(result.get("amount", "")), "4550004", "4550825"}
         candidates = [n for n in nums if n not in exclude_ids and not n.startswith("202") and not n.startswith("090") and not n.startswith("080")]
-        if candidates: result["id"] = candidates
+        if candidates: result["id"] = candidates[0]
 
     m_code = re.search(f"{label_no1}[^\\d]*(\\d{{4,10}})", tight_fixed)
     if m_code: result["client_code3"] = m_code.group(1)
@@ -634,21 +640,21 @@ def parse_ai(t: str, tight: str, result: dict):
     config = result.get("config", {})
     label_no1 = config.get("label_no1", "")
 
-    # 1. id: Tで始まるインボイス番号を明示除外した上でバーコード抽出
+    # 1. id: 【修正3】T始まりインボイス番号をtight上で確実に除外してバーコード抽出
     if not result.get("id"):
-        # 13桁数字を優先（JANバーコード形式）
-        barcodes_13 = re.findall(r"(?<!\d)\d{13}(?!\d)", tight)
+        barcodes_13 = re.findall(r"\d{13}", tight)
         valid = [n for n in barcodes_13
-                 if not n.startswith("202") and not n.startswith("0")]
+                 if not re.search(r"T" + n, tight)
+                 and not n.startswith("202")
+                 and not n.startswith("0")]
         if valid:
-            result["id"] = valid
+            result["id"] = valid[0]
         else:
-            # 8〜12桁にフォールバック（ただし直前にTがある番号は除外）
             barcodes_other = re.findall(r"(?<![T\d])\d{8,12}(?!\d)", tight)
             valid = [n for n in barcodes_other
                      if not n.startswith("202") and not n.startswith("0")]
             if valid:
-                result["id"] = valid
+                result["id"] = valid[0]
 
     # 2. client_code2: 業者NO
     if not result.get("client_code2"):
@@ -661,8 +667,7 @@ def parse_ai(t: str, tight: str, result: dict):
             if m_vendor2:
                 result["client_code2"] = m_vendor2.group(1)
 
-    # 3. content: 明細のNO.1 名称を抽出
-    # 「ＮＯ 名称 仕様 呼称 数量 単価 金額」の直後の行
+    # 3. content: 【修正2】明細のNO.1 名称を抽出（re.split戻り値リストの[0]を取得）
     if result.get("content") in (None, "注文工事"):
         m_meisai = re.search(
             r"(?:ＮＯ|NO)\s*名称.*?(?:\n|\r\n?)(\s*\d+\s+)([^\n]{3,50})",
@@ -670,8 +675,9 @@ def parse_ai(t: str, tight: str, result: dict):
         )
         if m_meisai:
             raw = m_meisai.group(2).strip()
-            # 仕様・数量などのノイズ列を除去
-            raw = re.split(r"\s{2,}|\t", raw).strip()
+            # 【修正2】re.split()の戻り値はリストなので[0]で最初の列（名称）のみ取得
+            parts = re.split(r"\s{2,}|\t", raw)
+            raw = parts[0].strip()
             if len(raw) >= 3:
                 result["content"] = raw
 
