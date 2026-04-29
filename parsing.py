@@ -169,7 +169,7 @@ def _clip_address(addr: str) -> str:
     m = re.search(r"(\d{1,4}[-－]\d{1,2}(?:[-－]\d{1,2})?|\d{1,2}丁目\d{1,2}番\d{0,2}号?|\d{1,2}丁目)", addr)
     if m: addr = addr[:m.end()]
     for stop in ["工期", "名称", "浄水槽", "工事", "金額", "電話", "FAX", "現場", "場所", "注文",
-                 "株式会社", "御中", "登録", "発注者", "新生", "代表"]:
+                 "株式会社", "御中", "登録", "発注者", "新生", "代表", "("]:
         if stop in addr: addr = addr[:addr.index(stop)]
     return addr
 
@@ -215,6 +215,9 @@ def _normalize_text(text: str) -> str:
         "現場iD": "現場ID", "上.件名": "工事件名", "西工場所": "施工場所", "2078-166": "2078-16",
         "工吏希号": "工事番号", "工雲名称": "工事名称", "注文番亨": "注文番号",
         "新生避": "新生建設", "新生建設妹": "新生建設", "新生建設歌": "新生建設",
+        "工坐": "工事", "工ず": "工事", "工壬": "工事",
+        "桑具": "桑員", "桑貝": "桑員",
+        "12口": "12日", "24口": "24日", "20口": "20日",
     }
     for k, v in replacements.items():
         t = t.replace(k, v)
@@ -931,10 +934,10 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     if not result["id"]:
         # 登録番号(T+13桁)の数字部分は除外
         reg_nos = set(re.findall(r"登録番号[：:]*T?(\d{10,13})", tight))
-        for ic in re.findall(r"[0-9]{7}", tight):
+        for ic in re.findall(r"[0-9]{7,8}", tight):
             skip = {str(result["amount"]), "4550004"}
-            # 登録番号の数字を含む場合はスキップ
-            if ic in skip or any(ic in rn for rn in reg_nos):
+            # 登録番号の数字を含む場合・202で始まる年度数字はスキップ
+            if ic in skip or any(ic in rn for rn in reg_nos) or ic.startswith("202"):
                 continue
             result["id"] = ic
             break
