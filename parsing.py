@@ -168,7 +168,8 @@ def _is_valid_date(y: str, m: str, d: str) -> bool:
 def _clip_address(addr: str) -> str:
     m = re.search(r"(\d{1,4}[-－]\d{1,2}(?:[-－]\d{1,2})?|\d{1,2}丁目\d{1,2}番\d{0,2}号?|\d{1,2}丁目)", addr)
     if m: addr = addr[:m.end()]
-    for stop in ["工期", "名称", "浄水槽", "工事", "金額", "電話", "FAX", "現場", "場所", "注文"]:
+    for stop in ["工期", "名称", "浄水槽", "工事", "金額", "電話", "FAX", "現場", "場所", "注文",
+                 "株式会社", "御中", "登録", "発注者", "新生", "代表"]:
         if stop in addr: addr = addr[:addr.index(stop)]
     return addr
 
