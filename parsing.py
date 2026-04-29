@@ -197,7 +197,8 @@ def _normalize_text(text: str) -> str:
         if matches: t = "\n".join(matches)
 
     replacements = {
-        "#知県": "愛知県", "愛知収": "愛知県", "雲知県": "愛知県", "寝知": "愛知県",
+        "#知県": "愛知県", "愛知収": "愛知県", "雲知県": "愛知県", "寝知": "愛知県", "愛知児": "愛知県",
+        "名古星市": "名古屋市", "名古国市": "名古屋市",
         "清市": "清須市", "西:枇杷島": "西枇杷島", "西:仁島": "西枇杷島",
         "小山井": "小田井", "文年川日": "注文年月日", "町丁目西_": "町",
         "名古国市": "名古屋市", "名古星市": "名古屋市", "阿部培設": "阿部建設",
@@ -211,6 +212,8 @@ def _normalize_text(text: str) -> str:
         "上Vこー": "工事コード", "上Vこ一": "工事コード", "上Vニー": "工事コード",
         "上Vこ": "工事コード", "工コード": "工事コード", "5均名": "現場名", "高山": "現場ID",
         "現場iD": "現場ID", "上.件名": "工事件名", "西工場所": "施工場所", "2078-166": "2078-16",
+        "工吏希号": "工事番号", "工雲名称": "工事名称", "注文番亨": "注文番号",
+        "新生避": "新生建設", "新生建設妹": "新生建設", "新生建設歌": "新生建設",
     }
     for k, v in replacements.items():
         t = t.replace(k, v)
@@ -692,10 +695,13 @@ def parse_ai(t: str, tight: str, result: dict):
 def parse_miyazaki_shinsei(t: str, tight: str, result: dict):
     """宮崎工務店・(株)宮崎・新生建設 共通帳票パーサー"""
     # 注文番号(例: T2511-7-26) → id
-    # OCRノイズ対応: T+数字-数字-数字 の形式を柔軟に取得
-    m_order = re.search(r"注文番号[\s:：]*([Tt][0-9]{3,6}[-－][0-9]{1,2}[-－][0-9]{1,2})", t)
+    # OCRノイズ対応: T が 7/t/1/l に化けるケースも含めて取得
+    m_order = re.search(r"注文番[号亨][\s:：]*([Tt71l][0-9]{3,6}[-－][0-9]{1,2}[-－][0-9]{1,2})", t)
     if m_order:
-        result["id"] = m_order.group(1).upper().replace("－", "-")
+        val = m_order.group(1)
+        # 先頭の T化けを T に正規化
+        val = re.sub(r"^[71l]", "T", val).upper().replace("－", "-")
+        result["id"] = val
 
     # 工事番号(例: 25107083) → client_code2
     m_kojino = re.search(r"工事番号[\s:：]*(\d{7,10})", t)
@@ -719,19 +725,29 @@ def parse_miyazaki_shinsei(t: str, tight: str, result: dict):
         result["startDate"] = _fmt(m_kouji.group(1), m_kouji.group(2), m_kouji.group(3))
         result["endDate"]   = _fmt(m_kouji.group(4), m_kouji.group(5), m_kouji.group(6))
 
-    # 注文金額: ¥マーク直後の数値を取得（OCRが¥416,500-と読んでも¥16,500-と読んでも対応）
-    # 「注文金額」ラベル直後のYen記号+数値パターンを優先
+    # 注文金額: OCRが ¥16,500- を 416,500 と読む場合に対応
+    # 戦略: ¥マーク直後 → 消費税から逆算 → tightから取得 の順で試みる
     m_amt_yen = re.search(r"注文金額[\s]*[¥￥\\]([0-9,]+)-?", t)
     if m_amt_yen:
         val = _num(m_amt_yen.group(1))
         if 1000 <= val <= 9_000_000:
             result["amount"] = val
     else:
-        m_amt = re.search(r"注文金額[\s¥￥\\]*([0-9,]+)-?", tight)
-        if m_amt:
-            val = _num(m_amt.group(1))
-            if 1000 <= val <= 9_000_000:
-                result["amount"] = val
+        # 消費税額から税込合計を逆算: 「消費税10% ¥X」→ X*11 が税込金額
+        m_tax = re.search(r"消費税10%[\s]*[¥￥\\1Il]?([0-9,]+)", t)
+        if m_tax:
+            tax_val = _num(m_tax.group(1))
+            if 100 <= tax_val <= 900_000:
+                inferred = tax_val * 11
+                if 1000 <= inferred <= 9_000_000:
+                    result["amount"] = inferred
+        # 消費税からも取れなければtightから取得
+        if not result.get("amount") or result["amount"] == 0:
+            m_amt2 = re.search(r"注文金額[\s¥￥\\]*([0-9,]+)-?", tight)
+            if m_amt2:
+                val = _num(m_amt2.group(1))
+                if 1000 <= val <= 9_000_000:
+                    result["amount"] = val
 
 
 def parse_globe(t: str, tight: str, result: dict):
