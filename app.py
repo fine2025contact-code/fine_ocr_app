@@ -207,7 +207,7 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
         "2-1. 契約枝番号(業者NO)": parsed.get("client_code2") or "",
         "2-2. 発注枝番": parsed.get("client_code3") or "",
         "3. 現場名(事業名)": parsed.get("site_name") or "-",
-        "3-1. 工事名(邸名)": parsed.get("site_name") or "-",
+        "3-1. 工事名(邸名)": parsed.get("koji_name") or parsed.get("site_name") or "-",
         "4. 施工場所(現場住所)": parsed.get("address") or "-",
         "5. 代金(金額)": int(amt) if isinstance(amt, (int, float)) else amt,
         "6. 工事件名(内容/名称)": parsed.get("content") or "不明",
