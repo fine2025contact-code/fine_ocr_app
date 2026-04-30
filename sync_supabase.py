@@ -3,6 +3,10 @@ GAS processSingleRowToSupabase / sendCheckedRows に相当する Supabase 同期
 projects → orders → order_items の順で挿入し、F18 の採番を行う。
 ※最新のOCR抽出辞書（site_name, billing_date, docType等）対応版
 ※fields_display（1〜10表示項目）対応版
+
+【バグ修正】
+- get_max_f18_counter: data はリストなので data[0].get(...) に修正
+- insert_fine_row: proj_data["id"] → proj_data[0]["id"]、order_data["id"] → order_data[0]["id"] に修正
 """
 
 from __future__ import annotations
@@ -39,7 +43,8 @@ def get_max_f18_counter(supabase: Client) -> int:
         )
         data = getattr(res, "data", None) or []
         if isinstance(data, list) and len(data) > 0:
-            return _parse_f18_counter(data.get("order_custom_no"))
+            # 【修正】data はリストなので [0] でアクセス
+            return _parse_f18_counter(data[0].get("order_custom_no"))
     except Exception:
         pass
     return 0
@@ -179,7 +184,8 @@ def insert_fine_row(
     proj_data = getattr(proj_res, "data", None) or []
     if not proj_data:
         raise RuntimeError("案件（projects）の作成に失敗しました。")
-    new_project_id = proj_data["id"] # リストアクセスエラー修正
+    # 【修正】proj_data はリストなので [0] でアクセス
+    new_project_id = proj_data[0]["id"]
 
     order_body: dict[str, Any] = {
         "project_id": new_project_id,
@@ -196,7 +202,8 @@ def insert_fine_row(
     order_data = getattr(order_res, "data", None) or []
     if not order_data:
         raise RuntimeError("注文（orders）の作成に失敗しました。")
-    new_order_id = order_data["id"] # リストアクセスエラー修正
+    # 【修正】order_data はリストなので [0] でアクセス
+    new_order_id = order_data[0]["id"]
 
     item_body: dict[str, Any] = {
         "order_id": new_order_id,
