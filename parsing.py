@@ -608,17 +608,31 @@ def parse_first(t: str, tight: str, result: dict):
         result["docType"] = m_denno.group(1).strip()
 
     # 工期: 令和表記 → 西暦変換
-    m_kouki = re.search(
-        r"(?:令和|R)(\d{1,2}|元)年(\d{1,2})月(\d{1,2})日\s*[～~〜]\s*(?:令和|R)(\d{1,2}|元)年(\d{1,2})月(\d{1,2})日",
-        t
-    )
-    if m_kouki:
-        def reiwa(y): return 2018 + (1 if y == "元" else int(y))
-        result["startDate"] = _fmt(reiwa(m_kouki.group(1)), m_kouki.group(2), m_kouki.group(3))
-        result["endDate"]   = _fmt(reiwa(m_kouki.group(4)), m_kouki.group(5), m_kouki.group(6))
+    # 「工期」ラベルの直後に日付がある場合のみ取得（空欄なら設定しない）
+    m_kouki_block = re.search(r"工期[\s\n]*(令和|R.{0,10}年)", t)
+    if m_kouki_block:
+        m_kouki = re.search(
+            r"(?:令和|R)(\d{1,2}|元)年(\d{1,2})月(\d{1,2})日\s*[～~〜]\s*(?:令和|R)(\d{1,2}|元)年(\d{1,2})月(\d{1,2})日",
+            t
+        )
+        if m_kouki:
+            def reiwa(y): return 2018 + (1 if y == "元" else int(y))
+            result["startDate"] = _fmt(reiwa(m_kouki.group(1)), m_kouki.group(2), m_kouki.group(3))
+            result["endDate"]   = _fmt(reiwa(m_kouki.group(4)), m_kouki.group(5), m_kouki.group(6))
+    # スラッシュ形式の工期にも対応
+    m_kouki_slash = re.search(r"工期[\s\n]*(\d{4}/\d{1,2}/\d{1,2})\s*[～~〜]\s*(\d{4}/\d{1,2}/\d{1,2})", t)
+    if m_kouki_slash:
+        result["startDate"] = _slash_to_fmt(m_kouki_slash.group(1))
+        result["endDate"]   = _slash_to_fmt(m_kouki_slash.group(2))
 
-    # 所在地: ファースト住建の発注者住所（春日井市柏井町）は除外
-    if result.get("address") and "柏井町" in result["address"]:
+    # 所在地: ファースト住建帳票の「所在地」ラベル直後の住所を優先取得
+    m_addr = re.search(r"所在地[\s\n]*〒[\s\d\-]+[\s\n]*([^\n]{5,80})", t)
+    if m_addr:
+        addr_raw = m_addr.group(1).strip()
+        result["address"] = addr_raw
+    # ファースト住建発注者の支店住所（柏井町・一社など）は除外
+    addr = result.get("address", "")
+    if addr and any(k in addr for k in ["柏井町", "名東区", "一社２丁目", "ラ・プリミエール"]):
         result["address"] = "-"
 
 
@@ -970,13 +984,16 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
         parse_globe(t, tight, result)
 
     # 専用パーサーでセット済みの日付は上書きせず、未セット分だけ補完
+    # ファースト住建は工期が空の場合があるため startDate/endDate の補完はしない
     dates = extract_dates_perfect(t, tight, company, COMPANY_LABEL_MAP.get(company, {}))
     if not result["date"]:        result["date"]        = dates.get("date")
-    if not result["startDate"]:   result["startDate"]   = dates.get("startDate")
-    if not result["endDate"]:     result["endDate"]      = dates.get("endDate")
     if not result["billing_date"]:result["billing_date"] = dates.get("billing_date")
+    if company != "ファースト住建":
+        if not result["startDate"]: result["startDate"] = dates.get("startDate")
+        if not result["endDate"]:   result["endDate"]   = dates.get("endDate")
 
-    if not result["startDate"] and result["date"]:
+    # ファースト住建は工期欄が空の場合があるのでdateをstartDateに使わない
+    if not result["startDate"] and result["date"] and result["company"] != "ファースト住建":
         result["startDate"] = result["date"]
 
     if not result["id"]:
