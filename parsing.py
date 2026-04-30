@@ -169,7 +169,7 @@ def _clip_address(addr: str) -> str:
     m = re.search(r"(\d{1,4}[-－]\d{1,2}(?:[-－]\d{1,2})?|\d{1,2}丁目\d{1,2}番\d{0,2}号?|\d{1,2}丁目)", addr)
     if m: addr = addr[:m.end()]
     for stop in ["工期", "名称", "浄水槽", "工事", "金額", "電話", "FAX", "現場", "場所", "注文",
-                 "株式会社", "御中", "登録", "発注者", "新生", "代表", "("]:
+                 "株式会社", "御中", "登録", "発注者", "新生", "代表", "(", "発注日", "施工"]:
         if stop in addr: addr = addr[:addr.index(stop)]
     return addr
 
@@ -560,44 +560,44 @@ def parse_sumitomo(t: str, tight: str, result: dict):
 
 def parse_first(t: str, tight: str, result: dict):
     """ファースト住建 専用パーサー
-    2. id       = [ 0005184 ] の番号（角括弧内）
-    2-1. code2  = 事業名欄の番号（例: 27004500）
-    3. site_name = 事業名の名称（例: 豊明市第７二村台）
-    6. content  = 細目工種（例: 舗装復旧）
-    10. docType = 発注伝票Ｎｏ（CH-212781）→ idの代わりにclient_code3へ
+    2. id       = 事業名欄の番号（例: 27044400）
+    2-1. code2  = 工事名欄の番号（例: 27044401-00）※ある場合のみ
+    3. site_name = 事業名の名称（例: 海部郡第２大治町長牧中道）
+    3-1. 工事名 = 工事名欄の名称テキスト（あれば）
+    6. content  = 細目工種（例: 給排水工事）
+    10. docType = 発注伝票Ｎｏ（CH-220829）
     """
-    # 2. id: [ 0005184 ] の角括弧内番号
-    m_bracket = re.search(r"\[\s*(\d{4,10})\s*\]", t)
-    if m_bracket:
-        result["id"] = m_bracket.group(1)
-
-    # 2-1. client_code2: 事業名欄の数字番号（例: 27004500）
+    # 2. id: 事業名欄の数字番号（例: 27044400）
     m_biz_no = re.search(r"事業名\s*(\d{6,10})", t)
     if m_biz_no:
-        result["client_code2"] = m_biz_no.group(1)
+        result["id"] = m_biz_no.group(1)
 
-    # 3. site_name: 事業名の名称テキスト（数字の後ろ）
+    # 2-1. client_code2: 工事名欄の番号（例: 27044401-00）※数字[-数字]形式
+    # 工事名の直後に番号がある場合のみ取得（ない場合は空）
+    m_koji_no = re.search(r"工事名\s*\n?(\d{6,10}(?:-\d{1,4})?)", t)
+    if m_koji_no:
+        result["client_code2"] = m_koji_no.group(1)
+
+    # 3. site_name: 事業名の名称テキスト（番号の後）
     m_biz_name = re.search(r"事業名\s*\d{6,10}\s*([^\n]{2,30})", t)
     if m_biz_name:
         raw = m_biz_name.group(1).strip()
-        # 「発注伝票No」等が続く場合は切る
         for stop in ["発注伝票", "工事名", "細目", "所在地", "発注日"]:
             if stop in raw: raw = raw[:raw.index(stop)].strip()
         if len(raw) >= 2:
             result["site_name"] = raw
 
-    # 3-1. 工事名（細目工種）→ content
+    # 6. content: 細目工種
     m_content = re.search(r"細目工種\s*([^\n]{2,30})", t)
     if m_content:
         result["content"] = m_content.group(1).strip()
 
-    # 発注伝票Noはdocに格納（画面10番）
+    # 10. docType: 発注伝票Ｎｏ
     m_denno = re.search(r"発注伝票[ＮN][ｏo]\s*([A-Za-z0-9\-]{4,20})", t)
     if m_denno:
         result["docType"] = m_denno.group(1).strip()
 
-    # 工期: 令和表記に対応（extract_dates_perfectの令和処理を補完）
-    # 「令和7年9月8日 ～ 令和7年9月8日」
+    # 工期: 令和表記 → 西暦変換
     m_kouki = re.search(
         r"(?:令和|R)(\d{1,2}|元)年(\d{1,2})月(\d{1,2})日\s*[～~〜]\s*(?:令和|R)(\d{1,2}|元)年(\d{1,2})月(\d{1,2})日",
         t
@@ -606,6 +606,10 @@ def parse_first(t: str, tight: str, result: dict):
         def reiwa(y): return 2018 + (1 if y == "元" else int(y))
         result["startDate"] = _fmt(reiwa(m_kouki.group(1)), m_kouki.group(2), m_kouki.group(3))
         result["endDate"]   = _fmt(reiwa(m_kouki.group(4)), m_kouki.group(5), m_kouki.group(6))
+
+    # 所在地: ファースト住建の発注者住所（春日井市柏井町）は除外
+    if result.get("address") and "柏井町" in result["address"]:
+        result["address"] = "-"
 
 
 def parse_abe(t: str, tight: str, result: dict):
