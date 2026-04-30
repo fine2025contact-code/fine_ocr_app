@@ -587,6 +587,16 @@ def parse_first(t: str, tight: str, result: dict):
         if len(raw) >= 2:
             result["site_name"] = raw
 
+    # 3-1. koji_name: 工事名欄の名称テキスト（番号の次の行）
+    # 工事名 → 番号 → 名称 の順の場合のみ取得
+    m_koji_name = re.search(r"工事名\s*\n?\d{6,10}(?:-\d{1,4})?\s*\n([^\n]{2,40})", t)
+    if m_koji_name:
+        raw_kn = m_koji_name.group(1).strip()
+        for stop in ["細目工種", "所在地", "発注日", "工期"]:
+            if stop in raw_kn: raw_kn = raw_kn[:raw_kn.index(stop)].strip()
+        if len(raw_kn) >= 2:
+            result["koji_name"] = raw_kn
+
     # 6. content: 細目工種
     m_content = re.search(r"細目工種\s*([^\n]{2,30})", t)
     if m_content:
@@ -872,7 +882,7 @@ def build_display_fields(result: dict) -> dict:
         "no2_1_code2":      _v(result.get("client_code2")),
         "no2_2_code3":      _v(result.get("client_code3")),
         "no3_site_name":    _v(result.get("site_name")),
-        "no3_1_kojimei":    _v(result.get("site_name")),   # 工事名（site_nameと同一ソース）
+        "no3_1_kojimei":    _v(result.get("koji_name")),
         "no4_address":      _v(result.get("address")),
         "no5_amount":       _amount_fmt(result.get("amount")),
         "no6_content":      _v(result.get("content")),
@@ -901,6 +911,7 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
         "address": "-",
         "content": "注文工事",
         "site_name": None,
+        "koji_name": None,
         "amount": 0,
         "docType": "注文書",
         "config": {},
