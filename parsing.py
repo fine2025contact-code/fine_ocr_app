@@ -404,7 +404,7 @@ def extract_address(t: str) -> str:
 # 会社判定
 # =========================
 def _detect_company(t: str, tight: str, file_name: str) -> str:
-    if any(k in t or k in tight or k in file_name for k in ["住友", "1P728", "住友不動産ハウジング"]): return "住友不動産"
+    if any(k in t or k in tight or k in file_name for k in ["住友", "1P728", "住友不動産ハウジング", "BtoBプラットフォーム契約書"]): return "住友不動産"
     if "グローブホーム" in t or "グローブホーム" in file_name: return "グローブホーム"
     if "グローブ" in t or "グローブ" in file_name: return "グローブホーム"
     if "阿部建設" in t or "阿部建設" in file_name: return "阿部建設"
@@ -564,6 +564,66 @@ def parse_globe(t: str, tight: str, result: dict):
     m_doc = re.search(r'支払区分\n([^\n]+)', t)
     if m_doc:
         result['docType'] = m_doc.group(1).strip()
+
+
+
+def parse_sumitomo_vertical(t: str, result: dict):
+    """
+    住友不動産 縦型帳票（注文書（電子契約））専用パーサー
+    BtoBプラットフォーム形式の本発注書。
+
+    テキスト構造:
+      「工事番号\n9L494」                        → 2. id
+      「132\n契約枝番00 発注枝番\n工事番号」      → 2-1. client_code2 / 2-2. client_code3
+      「工事名称清水 大世\n現場住所」             → 3. site_name
+      「現場住所愛知県...\nBtoB」                → 4. address
+      「合 計 金 額\n385,000」                   → 5. amount
+      「13.屋外給排水工事\n132\n」               → 6. content
+      「2026年1月19日」                          → 7. date
+      「2026/01/28～2026/05/20」                → 8. startDate / endDate
+    """
+    # 2. 工事番号 (id)
+    m = re.search(r'工事番号\n([0-9A-Z]{5})', t)
+    if m: result['id'] = m.group(1)
+
+    # 2-1. 契約枝番 (client_code2) ＆ 2-2. 発注枝番 (client_code3)
+    m = re.search(r'(\d{3})\n契約枝番(\d{2})\s*発注枝番\n工事番号', t)
+    if m:
+        result['client_code3'] = m.group(1)   # 発注枝番 (例: 132)
+        result['client_code2'] = m.group(2)   # 契約枝番 (例: 00)
+
+    # 3. 邸名 / 工事名称 (site_name)
+    m = re.search(r'工事名称(.+?)\n現場住所', t)
+    if m: result['site_name'] = m.group(1).strip()
+
+    # 4. 現場住所 (address)
+    m = re.search(r'現場住所(.+?)(?:\nBtoB|\nFAX|\n【)', t)
+    if m: result['address'] = m.group(1).strip()
+
+    # 5. 合計金額 (amount)
+    m = re.search(r'合\s*計\s*金\s*額\n([\d,]+)', t)
+    if m: result['amount'] = int(m.group(1).replace(',', ''))
+
+    # 6. 工事件名 (content): 「XX.屋外給排水工事\n発注枝番\n同内容」
+    m = re.search(r'\d+\.([^\n]+給排水[^\n]*)\n\d{3}\n', t)
+    if m:
+        result['content'] = m.group(1).strip()
+    else:
+        m = re.search(r'\d+\.([^\n]+)\n\d{3}\n(?:地域加算|\d+\.|-)', t)
+        if m: result['content'] = m.group(1).strip()
+
+    # 7. 発注日 (date)
+    m = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', t)
+    if m: result['date'] = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+
+    # 8. 工期
+    m = re.search(r'(\d{4}/\d{2}/\d{2})～(\d{4}/\d{2}/\d{2})', t)
+    if m:
+        result['startDate'] = m.group(1).replace('/', '-')
+        result['endDate']   = m.group(2).replace('/', '-')
+
+    # 10. 書類種別
+    result['docType'] = '注文書'
 
 
 def parse_sumitomo(t: str, tight: str, result: dict):
@@ -956,7 +1016,11 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     elif company == "阿部建設":
         parse_abe(t, tight, result)
     elif company in ("住友不動産", "住友不動産ハウジング(株)"):
-        parse_sumitomo(t, tight, result)
+        # 縦型（BtoBプラットフォーム/注文書（電子契約））か横型（追加注文書/B表）かを判定
+        if 'BtoBプラットフォーム契約書' in t or '工事名称' in t[:500]:
+            parse_sumitomo_vertical(t, result)
+        else:
+            parse_sumitomo(t, tight, result)
     elif company == "アイ工務店":
         parse_ai(t, tight, result)
     elif company in ("(株)宮崎工務店", "(株)宮崎", "新生建設(株)"):
