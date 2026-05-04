@@ -27,7 +27,7 @@ from sync_supabase import get_max_f18_counter, insert_fine_row, next_unique_f18
 
 # --- 1. ページ設定とデザイン ---
 st.set_page_config(
-    page_title="FINE Dashboard",
+    page_title="FINE OCR",
     page_icon="📄",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -111,7 +111,7 @@ st.markdown("""
         transition: all 0.2s ease;
     }
     section[data-testid="stSidebar"] {
-        background-color: #228b22;
+        background-color: #00AEEF;
         color: white;
     }
     section[data-testid="stSidebar"] .stMarkdown,
