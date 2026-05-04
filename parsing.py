@@ -532,7 +532,7 @@ def parse_globe(t: str, tight: str, result: dict):
         result['endDate'] = result['date']
 
     # 2. 契約番号 (id) ＆ 2-1. 現場ID (client_code2)
-    m_id = re.search(r'現場ID\n(\d+)\n契約番号\n([^\n]+)', t)
+    m_id = re.search(r'現\s*場\s*ID\s*\n(\d+)\n契約番号\n([^\n]+)', t)
     if m_id:
         result['client_code2'] = m_id.group(1).strip()   # 現場ID → 2-1
         result['id'] = m_id.group(2).strip()              # 契約番号 → 2
@@ -540,7 +540,7 @@ def parse_globe(t: str, tight: str, result: dict):
     # 3. 現場名 (site_name) ＆ 5. 代金 (amount)
     # 「現場名\n◯◯\n¥258,500\n 許可年月日」の構造で現場名と税込合計を同時取得
     # ¥直後が税込合計（消費税額ではない）
-    m_site_amt = re.search(r'現場名\n([^\n]+)\n¥([\d,]+)\n 許可年月日', t)
+    m_site_amt = re.search(r'現\s*場\s*名\s*\n([^\n]+)\n¥([\d,]+)\n 許可年月日', t)
     if m_site_amt:
         result['site_name'] = m_site_amt.group(1).strip()
         result['amount'] = int(m_site_amt.group(2).replace(',', ''))
