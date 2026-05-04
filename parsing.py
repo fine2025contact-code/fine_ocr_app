@@ -572,39 +572,49 @@ def parse_sumitomo_vertical(t: str, result: dict):
     住友不動産 縦型帳票（注文書（電子契約））専用パーサー
     BtoBプラットフォーム形式の本発注書。
 
-    テキスト構造:
-      「工事番号\n9L494」                        → 2. id
-      「132\n契約枝番00 発注枝番\n工事番号」      → 2-1. client_code2 / 2-2. client_code3
-      「工事名称清水 大世\n現場住所」             → 3. site_name
-      「現場住所愛知県...\nBtoB」                → 4. address
-      「合 計 金 額\n385,000」                   → 5. amount
-      「13.屋外給排水工事\n132\n」               → 6. content
-      「2026年1月19日」                          → 7. date
-      「2026/01/28～2026/05/20」                → 8. startDate / endDate
+    パターンA（旧）: ラベルと値が別行・スペースなし
+      「132\n契約枝番00 発注枝番\n工事番号\n9L494」
+      「工事名称清水 大世\n現場住所愛知県...」
+    パターンB（新）: ラベルと値が同一行・スペース区切り
+      「契約枝番 00 発注枝番 131\n工事番号\n5L316」
+      「工事名称 木村 空【SEM】\n現場住所 愛知県...」
     """
-    # 2. 工事番号 (id)
+    # 2. 工事番号 (id): 両パターン共通
     m = re.search(r'工事番号\n([0-9A-Z]{5})', t)
     if m: result['id'] = m.group(1)
 
     # 2-1. 契約枝番 (client_code2) ＆ 2-2. 発注枝番 (client_code3)
-    m = re.search(r'(\d{3})\n契約枝番(\d{2})\s*発注枝番\n工事番号', t)
+    # パターンB優先: 「契約枝番 00 発注枝番 131」（同一行）
+    m = re.search(r'契約枝番\s*(\d{2})\s*発注枝番\s*(\d{2,3})', t)
     if m:
-        result['client_code3'] = m.group(1)   # 発注枝番 (例: 132)
-        result['client_code2'] = m.group(2)   # 契約枝番 (例: 00)
+        result['client_code2'] = m.group(1)
+        result['client_code3'] = m.group(2)
+    else:
+        # パターンA: 「132\n契約枝番00 発注枝番\n工事番号」
+        m = re.search(r'(\d{3})\n契約枝番(\d{2})\s*発注枝番\n工事番号', t)
+        if m:
+            result['client_code3'] = m.group(1)
+            result['client_code2'] = m.group(2)
 
     # 3. 邸名 / 工事名称 (site_name)
-    m = re.search(r'工事名称(.+?)\n現場住所', t)
+    # パターンB: 「工事名称 木村 空【SEM】」（スペースあり）
+    # パターンA: 「工事名称清水 大世」（スペースなし）
+    m = re.search(r'工事名称\s+(.+?)(?:\n|$)', t)
+    if not m:
+        m = re.search(r'工事名称(.+?)\n現場住所', t)
     if m: result['site_name'] = m.group(1).strip()
 
     # 4. 現場住所 (address)
-    m = re.search(r'現場住所(.+?)(?:\nBtoB|\nFAX|\n【)', t)
+    m = re.search(r'現場住所\s+(.+?)(?:\nBtoB|\nFAX|\n【|\n$)', t)
+    if not m:
+        m = re.search(r'現場住所(.+?)(?:\nBtoB|\nFAX|\n【)', t)
     if m: result['address'] = m.group(1).strip()
 
     # 5. 合計金額 (amount)
     m = re.search(r'合\s*計\s*金\s*額\n([\d,]+)', t)
     if m: result['amount'] = int(m.group(1).replace(',', ''))
 
-    # 6. 工事件名 (content): 「XX.屋外給排水工事\n発注枝番\n同内容」
+    # 6. 工事件名 (content)
     m = re.search(r'\d+\.([^\n]+給排水[^\n]*)\n\d{3}\n', t)
     if m:
         result['content'] = m.group(1).strip()
