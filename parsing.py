@@ -7,27 +7,30 @@ Supabase連動による動的項目抽出対応版（アイ工務店対応）
 
 【修正内容】
 - parse_ai: インボイス番号(T始まり)を除外、13桁バーコードのみid抽出
-- parse_ai: content に明細ヘッダーゴミが混入する問題を修正（工事名ラベルから直接取得）
-- parse_ai: site_name / content を明確に分離（site_name=工事名、content=明細名称）
-- parse_universal: アイ工務店・住友不動産の content 抽出をスキップ（各専用パーサーに委譲）
+- parse_ai: content に明細ヘッダーゴミが混入する問題を修正
+- parse_ai: site_name / content を明確に分離
+- parse_universal: アイ工務店・住友不動産・グローブホームの抽出をスキップ
 - _normalize_text: 「様邸様邸」重複を修正
 - extract_amount: アイ工務店の税込合計行を優先取得
 - parse_ocr_text の返却辞書に表示用フィールド(fields_display)を追加
 
 【バグ修正 2026-04-29】
-- _slash_to_fmt: parts[0], parts[1], parts[2] のインデックス指定が欠落していたのを修正
-- parse_ai content抽出: re.split()の戻り値がリストのまま.strip()していたのを修正
-- parse_ai id抽出: T始まりインボイス番号(T+13桁)をtight文字列上で確実に除外
+- _slash_to_fmt: インデックス指定欠落を修正
+- parse_ai content抽出: re.split()戻り値のstrip()修正
+- parse_ai id抽出: T始まりインボイス番号を確実に除外
 
 【住友不動産パーサー全面修正 2026-05-04】
-- parse_sumitomo: 工事番号を帳票末尾「XXXXX @EYYYYY」パターンから正確に取得
-- parse_sumitomo: 邸名を「通しNo.(任意)」直後行から取得（住所混入を解消）
-- parse_sumitomo: 工事場所を邸名次行の都道府県行＋番地行から取得
-- parse_sumitomo: 契約枝番・発注枝番・発注金額・発注日を⑧注文請書ブロックから取得
-  （見積依頼日・単価の誤取得を解消）
-- parse_sumitomo: 品名・品番・工事内容から依頼者名の混入を解消
-- parse_sumitomo: 工期を帳票上部の日付2行から取得
-- parse_universal: 住友不動産の content 上書きをスキップ（アイ工務店と同様）
+- 工事番号を帳票末尾「XXXXX @EYYYYY」パターンから正確取得
+- 邸名・工事場所・契約枝番・発注枝番・発注金額・発注日を正確取得
+- 品名・品番・工事内容から依頼者名混入を解消
+- 工期を帳票上部の日付2行から取得
+
+【グローブホームパーサー全面修正 2026-05-04】
+- 全項目をPDF直接抽出テキストの構造から正確取得
+- 現場名(site_name): 「現場名\n◯◯\n¥金額」構造から正確取得（未取得バグ修正）
+- 契約番号(id)・現場ID(client_code2)・工事コード(client_code3)を正確取得
+- 代金(amount)・工事件名(content)・注文年月日(date)すべて修正
+- 支払区分(本体発注/追加発注)をdocTypeとして取得
 """
 from __future__ import annotations
 import re
@@ -64,7 +67,6 @@ def get_client_config(company_name: str) -> dict:
 # 動的抽出エンジン
 # =========================
 def dynamic_extract(label: str, text: str, pattern: str = r"([A-Z0-9-ー]+)") -> str | None:
-    """DBから取得したラベル名を使って値を抽出する汎用関数"""
     if not label:
         return None
     regex = f"{re.escape(label)}[^a-zA-Z0-9]*{pattern}"
@@ -93,15 +95,16 @@ CLIENT_ID_MAP: Final[dict[str, str]] = {
     "住友不動産": "7ba58ec1-6a68-463e-bcd9-1ebeb63c85fb",
     "阿部建設": "0cb5c980-9096-4c52-9dd7-7f24bc6b9a03",
     "ファースト住建": "4009a91d-61cf-4f3f-bd2f-4937b376f68d",
+    "グローブホーム": "YOUR_GLOBE_HOME_CLIENT_ID",  # ← 実際のIDに変更してください
     "TEST": "9336c048-c375-4094-8c6b-f6b95fd7a56c",
 }
 
 COMPANY_LABEL_MAP: Final[dict[str, dict[str, str]]] = {
     "グローブホーム": {
-        "id": "契約番号", "sub_id_1": "契約枝番号", "sub_id_2": "発注枝番",
-        "site_name": "現場名", "site_name_sub": "工事名", "address": "施工場所",
-        "amount": "代金", "content": "工事件名", "date": "注文書年月日",
-        "kouki": "工期", "billing_date": "請求日", "doc_type": "注文書種類"
+        "id": "契約番号", "sub_id_1": "現場ID", "sub_id_2": "工事コード",
+        "site_name": "現場名", "address": "施工場所",
+        "amount": "代金", "content": "工事件名", "date": "注文年月日",
+        "kouki": "工期", "billing_date": "請求日", "doc_type": "支払区分"
     },
     "阿部建設": {
         "id": "工事コード", "site_name": "工事名", "address": "工事場所",
@@ -214,13 +217,13 @@ def _normalize_text(text: str) -> str:
         "名古星市": "名古屋市", "名古国市": "名古屋市",
         "清市": "清須市", "西:枇杷島": "西枇杷島", "西:仁島": "西枇杷島",
         "小山井": "小田井", "文年川日": "注文年月日", "町丁目西_": "町",
-        "名古国市": "名古屋市", "名古星市": "名古屋市", "阿部培設": "阿部建設",
+        "阿部培設": "阿部建設",
         "多加良": "多加良浦", "253,500": "258,500", "253500": "258500",
         "一り_": "1月16日", "》可": "令和", "ド,": "1,", "ooo": "000",
         "契約那号": "契約番号", "本作発i": "本作発", "微妹": "邸", "祈築": "新築",
         "工丁": "工事", "川合微妹": "川合徹様 幸代様邸", "川合バ井": "川合徹様 幸代様邸",
         "幸代ば町祈築工丁": "新築工事", "幸代ば町": "幸代様邸", "川合微": "川合邸",
-        "阿部達設": "阿部建設", "阿部建段": "阿部建設", "ファースト住建": "ファースト住建",
+        "阿部達設": "阿部建設", "阿部建段": "阿部建設",
         "メ-gり": "メータ廻り", "メ-うり": "メータ廻り", "申請英": "申請費", "申請救": "申請費",
         "上Vこー": "工事コード", "上Vこ一": "工事コード", "上Vニー": "工事コード",
         "上Vこ": "工事コード", "工コード": "工事コード", "5均名": "現場名", "高山": "現場ID",
@@ -234,10 +237,8 @@ def _normalize_text(text: str) -> str:
     for k, v in replacements.items():
         t = t.replace(k, v)
 
-    # 様邸の重複除去
     t = re.sub(r"様邸\s*様邸", "様邸", t)
     t = re.sub(r"(様邸){2,}", "様邸", t)
-
     t = re.sub(r"上志(?!段味)", "上志段味", t)
     t = re.sub(r"上志段味\s*味中\s*[\"']?\s*3078[-－]?1?6?", "上志段味東谷2078-16", t)
     t = re.sub(r"上志段味[^\n]{0,10}?3078[-－]?1?6?", "上志段味東谷2078-16", t)
@@ -255,7 +256,6 @@ def _normalize_text(text: str) -> str:
 # 金額抽出
 # =========================
 def extract_amount(t: str, tight: str) -> int:
-    # アイ工務店: 「合計」最終行（税込合計）を最優先
     ai_top = re.search(r"合計\s*([0-9,]{4,10})\s*$", t, re.MULTILINE)
     if ai_top:
         val = _num(ai_top.group(1))
@@ -285,7 +285,6 @@ def extract_amount(t: str, tight: str) -> int:
         if m:
             val = _num(m.group(1))
             if 5000 <= val <= 9000000: label_amts.append(val)
-
     if label_amts: return max(label_amts)
 
     labels = ["計", "税込合計", "合計(税込)", "(税込)", "合計", "代金"]
@@ -317,24 +316,10 @@ def extract_dates_perfect(t: str, tight: str, company: str, labels: dict = {}) -
     if m_bill:
         result["billing_date"] = _fmt(m_bill.group(1), m_bill.group(2), m_bill.group(3))
 
-    if company == "グローブホーム" or company == "(株)グローブホーム":
-        m = re.search(r"(20\d{2})年(\d{1,2})月(\d{1,2})日", tight)
-        if m:
-            d = _fmt(m.group(1), m.group(2), m.group(3))
-            result["date"] = result["startDate"] = result["endDate"] = d
-            return result
-        m = re.search(r"(\d{1,2})月(\d{1,2})日", tight)
-        if m:
-            d = _fmt(datetime.date.today().year, m.group(1), m.group(2))
-            result["date"] = result["startDate"] = result["endDate"] = d
-            return result
-
-    if company in ("住友不動産", "住友不動産ハウジング(株)"):
-        # 住友不動産は parse_sumitomo で日付を取得するため、
-        # ここでは billing_date のみ補完して早期リターン
+    # グローブホーム・住友不動産は専用パーサーで日付取得済み
+    if company in ("グローブホーム", "住友不動産", "住友不動産ハウジング(株)"):
         return result
 
-    # 宮崎・新生建設系: 「自 YYYY年MM月DD日 至 YYYY年MM月DD日」を優先処理
     kouji_m = re.search(
         r"[自从]\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*[至迄]\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
         t
@@ -351,7 +336,6 @@ def extract_dates_perfect(t: str, tight: str, company: str, labels: dict = {}) -
     if result["startDate"]:
         return result
 
-    # スラッシュ区切り工期（アイ工務店形式: 2025/12/18～2026/05/16）
     kouji_slash = re.search(
         r"工\s*[　 ]*期\s*[　 ]*(\d{4}/\d{1,2}/\d{1,2})\s*[~～〜\-]\s*(\d{4}/\d{1,2}/\d{1,2})",
         t
@@ -421,6 +405,7 @@ def extract_address(t: str) -> str:
 # =========================
 def _detect_company(t: str, tight: str, file_name: str) -> str:
     if any(k in t or k in tight or k in file_name for k in ["住友", "1P728", "住友不動産ハウジング"]): return "住友不動産"
+    if "グローブホーム" in t or "グローブホーム" in file_name: return "グローブホーム"
     if "グローブ" in t or "グローブ" in file_name: return "グローブホーム"
     if "阿部建設" in t or "阿部建設" in file_name: return "阿部建設"
     if "ファースト住建" in t or "ファースト住建" in file_name: return "ファースト住建"
@@ -449,10 +434,13 @@ def parse_universal(t: str, tight: str, result: dict, company: str):
     if not labels:
         return
 
+    # グローブホーム・住友不動産は専用パーサーで全項目取得するためスキップ
+    if company in ("グローブホーム", "住友不動産", "住友不動産ハウジング(株)"):
+        return
+
     lbl_id = labels.get("id")
     if lbl_id:
         if company == "アイ工務店":
-            # T始まりインボイス番号(T+13桁)をtight上で確実に除外してバーコード抽出
             nums = re.findall(r"\d{13}", tight)
             valid_nums = [n for n in nums if not re.search(r"T" + n, tight) and not n.startswith("202") and not n.startswith("0")]
             if valid_nums:
@@ -462,8 +450,7 @@ def parse_universal(t: str, tight: str, result: dict, company: str):
                 valid_nums = [n for n in nums if not n.startswith("202") and not n.startswith("0")]
                 if valid_nums:
                     result["id"] = valid_nums[0]
-        elif company not in ("住友不動産", "住友不動産ハウジング(株)"):
-            # 住友不動産は parse_sumitomo で取得済みのためスキップ
+        else:
             m_id = re.search(f"{re.escape(lbl_id)}\\s*([A-Za-z0-9\\-]+)", t)
             if not m_id: m_id = re.search(f"{re.escape(lbl_id)}([A-Za-z0-9\\-]+)", tight)
             if m_id:
@@ -472,18 +459,17 @@ def parse_universal(t: str, tight: str, result: dict, company: str):
 
     for key, res_key in [("sub_id_1", "client_code2"), ("sub_id_2", "client_code3")]:
         lbl_sub = labels.get(key)
-        if lbl_sub and company not in ("アイ工務店", "住友不動産", "住友不動産ハウジング(株)"):
+        if lbl_sub and company != "アイ工務店":
             m_sub = re.search(f"{re.escape(lbl_sub)}\\s*([A-Za-z0-9\\-]+)", t)
             if m_sub: result[res_key] = m_sub.group(1).strip()
 
-    # アイ工務店: 業者NOをclient_code2に格納
     if company == "アイ工務店":
         m_vendor = re.search(r"業者[ＮN][ＯO]\s*(\d{4,8})", t)
         if m_vendor:
             result["client_code2"] = m_vendor.group(1)
 
     lbl_site = labels.get("site_name")
-    if lbl_site and company not in ("住友不動産", "住友不動産ハウジング(株)"):
+    if lbl_site:
         m_site = re.search(f"{re.escape(lbl_site)}[\\s:：]*([^\\n]{{2,50}})", t)
         if m_site:
             raw_site = m_site.group(1).strip()
@@ -492,8 +478,7 @@ def parse_universal(t: str, tight: str, result: dict, company: str):
             if len(raw_site) >= 2: result["site_name"] = raw_site
 
     lbl_content = labels.get("content")
-    # アイ工務店・住友不動産は専用パーサーで content を取得するためスキップ
-    if lbl_content and company not in ("アイ工務店", "住友不動産", "住友不動産ハウジング(株)"):
+    if lbl_content and company != "アイ工務店":
         if company in ("新生建設(株)", "(株)宮崎工務店", "(株)宮崎"):
             m_content = re.search(f"{re.escape(lbl_content)}[\\s:：]*([^\\n]{{2,80}})", t)
         else:
@@ -511,64 +496,99 @@ def parse_universal(t: str, tight: str, result: dict, company: str):
                 if len(raw_content) >= 2: result["content"] = raw_content
 
     lbl_amount = labels.get("amount")
-    if lbl_amount and company not in ("住友不動産", "住友不動産ハウジング(株)"):
+    if lbl_amount:
         m_amt = re.search(f"{re.escape(lbl_amount)}[^\\d]*([\\d,]+)", tight)
         if m_amt:
             amt_val = _num(m_amt.group(1))
             if 1000 <= amt_val <= 9000000: result["amount"] = amt_val
 
     lbl_doc = labels.get("doc_type")
-    if company in ("住友不動産", "住友不動産ハウジング(株)"):
-        pass  # parse_sumitomo で設定済み
-    elif lbl_doc:
+    if lbl_doc:
         m_doc = re.search(f"{re.escape(lbl_doc)}[\\s:：]*([^\\s]{{2,20}})", t)
         if m_doc: result["docType"] = m_doc.group(1).strip()
 
 # =========================
 # 会社別専用パーサー
 # =========================
+
+def parse_globe(t: str, tight: str, result: dict):
+    """
+    グローブホーム 専用パーサー（修正版 2026-05-04 v2）
+
+    PDFによってテキスト出力順が異なるため、ラベル直後の行を個別に取得する。
+    構造は常に以下の固定ペアで出現:
+      「現場ID\n数字\n契約番号\n番号」
+      「現場名\n◯◯\n¥税込合計\n 許可年月日」  ← 現場名と代金を同時取得
+      「施工場所\n愛知県...」
+      「工事件名\n内容」
+      「工事コード\n数字」
+      「支払区分\n本体発注 or 追加発注」
+    """
+    # 7. 注文年月日 (date)
+    m_date = re.search(r'(\d{4})\n年\n(\d{1,2})\n月\n(\d{1,2})\n日', t)
+    if m_date:
+        result['date'] = f"{m_date.group(1)}-{int(m_date.group(2)):02d}-{int(m_date.group(3)):02d}"
+        result['startDate'] = result['date']
+        result['endDate'] = result['date']
+
+    # 2. 契約番号 (id) ＆ 2-1. 現場ID (client_code2)
+    m_id = re.search(r'現場ID\n(\d+)\n契約番号\n([^\n]+)', t)
+    if m_id:
+        result['client_code2'] = m_id.group(1).strip()   # 現場ID → 2-1
+        result['id'] = m_id.group(2).strip()              # 契約番号 → 2
+
+    # 3. 現場名 (site_name) ＆ 5. 代金 (amount)
+    # 「現場名\n◯◯\n¥258,500\n 許可年月日」の構造で現場名と税込合計を同時取得
+    # ¥直後が税込合計（消費税額ではない）
+    m_site_amt = re.search(r'現場名\n([^\n]+)\n¥([\d,]+)\n 許可年月日', t)
+    if m_site_amt:
+        result['site_name'] = m_site_amt.group(1).strip()
+        result['amount'] = int(m_site_amt.group(2).replace(',', ''))
+
+    # 4. 施工場所 (address)
+    m_addr = re.search(r'施工場所\n([^\n]+)', t)
+    if m_addr:
+        result['address'] = m_addr.group(1).strip()
+
+    # 6. 工事件名 (content)
+    m_content = re.search(r'工事件名\n([^\n]+)', t)
+    if m_content:
+        result['content'] = m_content.group(1).strip()
+
+    # 2-2. 工事コード (client_code3)
+    m_code = re.search(r'工事コード\n(\d+)', t)
+    if m_code:
+        result['client_code3'] = m_code.group(1)
+
+    # 10. 支払区分 (docType)
+    m_doc = re.search(r'支払区分\n([^\n]+)', t)
+    if m_doc:
+        result['docType'] = m_doc.group(1).strip()
+
+
 def parse_sumitomo(t: str, tight: str, result: dict):
     """
     住友不動産ハウジング㈱ 専用パーサー（修正版 2026-05-04）
 
-    抽出項目:
-      2.  id            = 工事番号（例: 6L351, 1P728, 8L559）
-                          帳票末尾の「XXXXX @EYYYYY」パターンから取得
-      2-1. client_code2 = 契約枝番（例: 01）
-      2-2. client_code3 = 発注枝番（例: 017, 020, 023）
-      3.  site_name     = 邸名（例: 菅井 俊甫）
-                          「通しNo. (任意)」直後行から取得
-      4.  address       = 工事場所（愛知県...）
-                          邸名直後の都道府県行＋番地行を結合
-      5.  amount        = 発注金額（税込）（例: 15840）
-                          ⑧注文請書ブロックの \金額 から取得
-      6.  content       = 品名・品番・工事内容（例: 洗面W1200）
-                          依頼者名を除いた工事内容のみを取得
-      7.  date          = 発注日（例: 2026-04-15）
-                          ⑧注文請書ブロックの日付（見積依頼日ではなく発注日）
-      8.  startDate     = 工期開始（例: 2026-06-10）
-          endDate       = 工期終了（例: 2026-06-12）
-                          帳票上部の日付2行から取得
-      10. docType       = "B表（追加注文書）" or "注文書"
-                          「B 表」「B表」テキストの有無で判定
+    帳票テキスト構造:
+      末尾「6L351 @E53433」              → 2. id(工事番号) / 業者コード
+      「通しNo. (任意)\n邸名\n都道府県\n番地\n業者コード」 → 3. site_name / 4. address
+      「⑧注文請書\n0 1\n017\n\15,840\n2026/4/15」  → 2-1/2-2/5/7
+      「依頼者\n品名・品番・工事内容\n日付\n依頼者名\n内容」 → 6. content
+      「YYYY/M/D\nYYYY/M/D\n～ or （変更」 → 8. startDate/endDate
+      「B 表」有無                         → 10. docType
     """
-
-    # === 2. 工事番号 (id) ===
-    # 帳票末尾に「6L351 @E53433」のような形で業者コードと並んで記載される
+    # 2. 工事番号 (id)
     m_code = re.search(r'([0-9A-Z]{5})\s+@(E\d{5})', t)
     if m_code:
         result['id'] = m_code.group(1)
-        # 業者コード（@Exxxxx）も保存（client_code2 は後段の⑧ブロックで上書き）
-        result['_sumitomo_e_code'] = m_code.group(2)
 
-    # === 3. 邸名 (site_name) ===
-    # 「通しNo. (任意)」ラベルの直後の行が邸名
+    # 3. 邸名 (site_name)
     m_teinei = re.search(r'通しNo\. \(任意\)\n([^\n]+)', t)
     if m_teinei:
         result['site_name'] = m_teinei.group(1).strip()
 
-    # === 4. 工事場所 (address) ===
-    # 邸名の次行: 都道府県で始まる行 + 次の番地行を結合
+    # 4. 工事場所 (address)
     m_place = re.search(
         r'通しNo\. \(任意\)\n[^\n]+\n'
         r'((?:愛知県|東京都|大阪府|京都府|北海道|[^\n]+?[都道府県])[^\n]+)\n'
@@ -578,7 +598,6 @@ def parse_sumitomo(t: str, tight: str, result: dict):
     if m_place:
         result['address'] = (m_place.group(1) + m_place.group(2)).strip()
     else:
-        # 番地行がない場合（例: 桜が丘２６１ のような丁目なし住所）
         m_place2 = re.search(
             r'通しNo\. \(任意\)\n[^\n]+\n'
             r'((?:愛知県|東京都|大阪府|京都府|北海道|[^\n]+?[都道府県])[^\n]+)',
@@ -587,38 +606,32 @@ def parse_sumitomo(t: str, tight: str, result: dict):
         if m_place2:
             result['address'] = m_place2.group(1).strip()
 
-    # === ⑧注文請書ブロック: 契約枝番・発注枝番・発注金額・発注日 ===
-    # テキスト構造（通常版）:
-    #   ⑧注文請書
-    #   0 1          ← 契約枝番（スペース区切り）
-    #   017          ← 発注枝番
-    #   \15,840      ← 発注金額（税込）  ※ [\\] = バックスラッシュ1文字
-    #   2026/4/15    ← 発注日
+    # 2-1(契約枝番)・2-2(発注枝番)・5(発注金額)・7(発注日)
+    # 構造: 「⑧注文請書\n0 1\n017\n\15,840\n2026/4/15」
+    # [\\] = バックスラッシュ1文字にマッチ
     m_block = re.search(
         r'⑧注文請書\n([\d ]+)\n(\d+)\n[\\]([\d,]+)\n(\d{4}/\d{1,2}/\d{1,2})',
         t
     )
     if m_block:
-        result['client_code2'] = m_block.group(1).replace(' ', '')   # "01"
-        result['client_code3'] = m_block.group(2)                     # "017"
-        result['amount']       = int(m_block.group(3).replace(',', ''))  # 15840
-        result['date']         = _slash_to_fmt(m_block.group(4))     # "2026-04-15"
+        result['client_code2'] = m_block.group(1).replace(' ', '')
+        result['client_code3'] = m_block.group(2)
+        result['amount']       = int(m_block.group(3).replace(',', ''))
+        result['date']         = _slash_to_fmt(m_block.group(4))
     else:
-        # B表形式: 枝番・金額なし。発注日のみ
+        # B表形式: 発注日のみ
         m_b_date = re.search(r'⑧注文請書\n(\d{4}/\d{1,2}/\d{1,2})', t)
         if m_b_date:
             result['date'] = _slash_to_fmt(m_b_date.group(1))
 
-    # 発注金額（⑧ブロックで取れなかった場合）: バックスラッシュ付き金額の最大値
+    # 発注金額（ブロックで取れなかった場合）
     if not result.get('amount') or result['amount'] == 0:
         all_amts = [int(a.replace(',', '')) for a in re.findall(r'[\\]([\d,]{3,})', t)]
         valid = [a for a in all_amts if 1000 <= a <= 9_000_000]
         if valid:
             result['amount'] = max(valid)
 
-    # === 6. 品名・品番・工事内容 (content) ===
-    # 「依頼者\n品名・品番・工事内容\n日付\n依頼者名\n内容」の構造
-    # 依頼者名（下村、里見 など）は除いて内容のみ取得
+    # 6. 品名・品番・工事内容 (content): 依頼者名を除いた工事内容のみ
     m_content = re.search(
         r'依頼者\n品名・品番・工事内容\n[\d/]+\n[^\n]+\n([^\n]+)',
         t
@@ -626,10 +639,7 @@ def parse_sumitomo(t: str, tight: str, result: dict):
     if m_content:
         result['content'] = m_content.group(1).strip()
 
-    # === 8. 工期 (startDate / endDate) ===
-    # 帳票上部に 2行の日付 + 区切り文字の構造
-    # 通常版: "2026/6/10\n2026/6/12\n～"
-    # B表版:  "2026/3/11\n2026/3/13\n（変更"
+    # 8. 工期: 帳票上部の日付2行
     m_kouki = re.search(
         r'(20\d{2}/\d{1,2}/\d{1,2})\n(20\d{2}/\d{1,2}/\d{1,2})\n[～~（変更]',
         t
@@ -638,7 +648,7 @@ def parse_sumitomo(t: str, tight: str, result: dict):
         result['startDate'] = _slash_to_fmt(m_kouki.group(1))
         result['endDate']   = _slash_to_fmt(m_kouki.group(2))
 
-    # === 10. 書類種別 (docType) ===
+    # 10. 書類種別
     if 'B 表' in t or 'B表' in t:
         result['docType'] = 'B表（追加注文書）'
     else:
@@ -647,45 +657,32 @@ def parse_sumitomo(t: str, tight: str, result: dict):
 
 def parse_first(t: str, tight: str, result: dict):
     """ファースト住建 専用パーサー"""
-    # 2. id: 事業名欄の数字番号
     m_biz_no = re.search(r"事業名\s*(\d{6,10})", t)
-    if m_biz_no:
-        result["id"] = m_biz_no.group(1)
+    if m_biz_no: result["id"] = m_biz_no.group(1)
 
-    # 2-1. client_code2: 工事名欄の番号
     m_koji_no = re.search(r"工事名\s*\n?(\d{6,10}(?:-\d{1,4})?)", t)
-    if m_koji_no:
-        result["client_code2"] = m_koji_no.group(1)
+    if m_koji_no: result["client_code2"] = m_koji_no.group(1)
 
-    # 3. site_name: 事業名の名称テキスト
     m_biz_name = re.search(r"事業名\s*\d{6,10}\s*([^\n]{2,30})", t)
     if m_biz_name:
         raw = m_biz_name.group(1).strip()
         for stop in ["発注伝票", "工事名", "細目", "所在地", "発注日"]:
             if stop in raw: raw = raw[:raw.index(stop)].strip()
-        if len(raw) >= 2:
-            result["site_name"] = raw
+        if len(raw) >= 2: result["site_name"] = raw
 
-    # 3-1. koji_name: 工事名欄の名称テキスト
     m_koji_name = re.search(r"工事名\s*\n?\d{6,10}(?:-\d{1,4})?\s*\n([^\n]{2,40})", t)
     if m_koji_name:
         raw_kn = m_koji_name.group(1).strip()
         for stop in ["細目工種", "所在地", "発注日", "工期"]:
             if stop in raw_kn: raw_kn = raw_kn[:raw_kn.index(stop)].strip()
-        if len(raw_kn) >= 2:
-            result["koji_name"] = raw_kn
+        if len(raw_kn) >= 2: result["koji_name"] = raw_kn
 
-    # 6. content: 細目工種
     m_content = re.search(r"細目工種\s*([^\n]{2,30})", t)
-    if m_content:
-        result["content"] = m_content.group(1).strip()
+    if m_content: result["content"] = m_content.group(1).strip()
 
-    # 10. docType: 発注伝票Ｎｏ
     m_denno = re.search(r"発注伝票[ＮN][ｏo]\s*([A-Za-z0-9\-]{4,20})", t)
-    if m_denno:
-        result["docType"] = m_denno.group(1).strip()
+    if m_denno: result["docType"] = m_denno.group(1).strip()
 
-    # 工期
     m_kouki_block = re.search(r"工期[\s\n]*(令和|R.{0,10}年)", t)
     if m_kouki_block:
         m_kouki = re.search(
@@ -701,11 +698,8 @@ def parse_first(t: str, tight: str, result: dict):
         result["startDate"] = _slash_to_fmt(m_kouki_slash.group(1))
         result["endDate"]   = _slash_to_fmt(m_kouki_slash.group(2))
 
-    # 所在地
     m_addr = re.search(r"所在地[\s\n]*〒[\s\d\-]+[\s\n]*([^\n]{5,80})", t)
-    if m_addr:
-        addr_raw = m_addr.group(1).strip()
-        result["address"] = addr_raw
+    if m_addr: result["address"] = m_addr.group(1).strip()
     addr = result.get("address", "")
     if addr and any(k in addr for k in ["柏井町", "名東区", "一社２丁目", "ラ・プリミエール"]):
         result["address"] = "-"
@@ -777,9 +771,6 @@ def parse_abe(t: str, tight: str, result: dict):
 
 def parse_ai(t: str, tight: str, result: dict):
     """アイ工務店専用パーサー"""
-    config = result.get("config", {})
-
-    # 1. id: T始まりインボイス番号をtight上で確実に除外してバーコード抽出
     if not result.get("id"):
         barcodes_13 = re.findall(r"\d{13}", tight)
         valid = [n for n in barcodes_13
@@ -795,7 +786,6 @@ def parse_ai(t: str, tight: str, result: dict):
             if valid:
                 result["id"] = valid[0]
 
-    # 2. client_code2: 業者NO
     if not result.get("client_code2"):
         m_vendor = re.search(r"業者[ＮN][ＯO]\s*(\d{4,8})", t)
         if m_vendor:
@@ -805,12 +795,10 @@ def parse_ai(t: str, tight: str, result: dict):
             if m_vendor2:
                 result["client_code2"] = m_vendor2.group(1)
 
-    # 3. content: 明細名称
     m_meisai = re.search(r"備考\n[１-９1-9]\n([^\n]{3,50})\n", t)
     if m_meisai:
         result["content"] = m_meisai.group(1).strip()
 
-    # 4. site_name: 工事名
     if not result.get("site_name"):
         m_kojimei = re.search(r"工\s*事\s*名\s+(.+?)(?:\n|工\s*期|建\s*築\s*地)", t)
         if m_kojimei:
@@ -829,17 +817,14 @@ def parse_miyazaki_shinsei(t: str, tight: str, result: dict):
         result["id"] = val
 
     m_kojino = re.search(r"工事番号[\s:：]*(\d{7,10})", t)
-    if m_kojino:
-        result["client_code2"] = m_kojino.group(1)
+    if m_kojino: result["client_code2"] = m_kojino.group(1)
 
     m_content = re.search(r"工事名称[\s:：]*([^\n]{4,80})", t)
     if m_content:
         content = m_content.group(1).strip()
         for stop in ["現場主任", "工事場所", "工　期", "工期", "請求締日", "支払"]:
-            if stop in content:
-                content = content[:content.index(stop)].strip()
-        if len(content) >= 3:
-            result["content"] = content
+            if stop in content: content = content[:content.index(stop)].strip()
+        if len(content) >= 3: result["content"] = content
 
     m_kouji = re.search(
         r"[自从]\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*[至迄]\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
@@ -852,74 +837,22 @@ def parse_miyazaki_shinsei(t: str, tight: str, result: dict):
     m_amt_yen = re.search(r"注文金額[\s]*[¥￥\\]([0-9,]+)-?", t)
     if m_amt_yen:
         val = _num(m_amt_yen.group(1))
-        if 1000 <= val <= 9_000_000:
-            result["amount"] = val
+        if 1000 <= val <= 9_000_000: result["amount"] = val
     else:
         m_tax = re.search(r"消費税10%[\s]*[¥￥\\1Il]?([0-9,]+)", t)
         if m_tax:
             tax_val = _num(m_tax.group(1))
             if 100 <= tax_val <= 900_000:
                 inferred = tax_val * 11
-                if 1000 <= inferred <= 9_000_000:
-                    result["amount"] = inferred
+                if 1000 <= inferred <= 9_000_000: result["amount"] = inferred
         if not result.get("amount") or result["amount"] == 0:
             m_amt2 = re.search(r"注文金額[\s¥￥\\]*([0-9,]+)-?", tight)
             if m_amt2:
                 val = _num(m_amt2.group(1))
-                if 1000 <= val <= 9_000_000:
-                    result["amount"] = val
-
-
-def parse_globe(t: str, tight: str, result: dict):
-    """グローブホーム専用帳票パーサー"""
-    PREFS = (
-        "東京都", "北海道", "京都府", "大阪府",
-        "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
-        "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "神奈川県",
-        "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県",
-        "岐阜県", "静岡県", "愛知県", "三重県",
-        "滋賀県", "兵庫県", "奈良県", "和歌山県",
-        "鳥取県", "島根県", "岡山県", "広島県", "山口県",
-        "徳島県", "香川県", "愛媛県", "高知県",
-        "福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県",
-    )
-
-    m_content = re.search(r"工事件名(.+?)(?=施工場所|現場|工期|契約|発注|小計|消費|合計|$)", tight)
-    if m_content:
-        raw = m_content.group(1).strip()
-        for stop in ["施工場所", "現場", "工期", "契約", "発注", "小計", "消費", "合計"]:
-            if stop in raw:
-                raw = raw[:raw.index(stop)].strip()
-        if len(raw) >= 2:
-            result["content"] = raw
-
-    if result.get("content") in (None, "注文工事"):
-        m_content_line = re.search(r"工事件名\s*([^\n]{2,50})", t)
-        if m_content_line:
-            raw = m_content_line.group(1).strip()
-            for stop in ["施工場所", "現場", "工期", "契約"]:
-                if stop in raw:
-                    raw = raw[:raw.index(stop)].strip()
-            if len(raw) >= 2:
-                result["content"] = raw
-
-    addr = result.get("address", "-")
-    if addr and addr != "-":
-        if not any(addr.startswith(p) for p in PREFS):
-            candidate = addr[1:]
-            if any(candidate.startswith(p) for p in PREFS):
-                result["address"] = candidate
-
-    m_contract = re.search(r"契約番号\s*([\d\-]+)", t)
-    if not m_contract:
-        m_contract = re.search(r"契約番号([\d\-]+)", tight)
-    if m_contract:
-        contract_digits = re.sub(r"[^0-9\-]", "", m_contract.group(1).strip())
-        if contract_digits:
-            result["id"] = contract_digits
+                if 1000 <= val <= 9_000_000: result["amount"] = val
 
 # =========================
-# 表示用フィールド生成（1〜10の枠表示用）
+# 表示用フィールド生成
 # =========================
 def build_display_fields(result: dict) -> dict:
     def _v(val):
@@ -999,15 +932,8 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     result["delivery_id"] = dynamic_extract(config.get("label_delivery_id"), tight)
     result["biz_name"]    = dynamic_extract(config.get("label_biz_name"), tight)
 
-    doc_label = config.get("label_doc_name")
-    if doc_label and doc_label in tight:
-        result["docType"] = doc_label
-    elif company in ("住友不動産", "住友不動産ハウジング(株)"):
-        # docType は parse_sumitomo で設定するためここでは初期値のまま
-        pass
-
-    # 住友不動産以外の金額・住所をここで先に取得
-    if company not in ("住友不動産", "住友不動産ハウジング(株)"):
+    # グローブホーム・住友不動産は専用パーサーで全項目取得するため汎用抽出はスキップ
+    if company not in ("グローブホーム", "住友不動産", "住友不動産ハウジング(株)"):
         result["amount"] = extract_amount(t, tight)
         result["address"] = extract_address(t)
 
@@ -1016,11 +942,13 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     code_e = re.search(r"(E[0-9]{5})", tight)
     if code_e: result["client_code2"] = code_e.group(0)
 
-    # 汎用パーサー（辞書ベース）
+    # 汎用パーサー（グローブホーム・住友不動産はスキップ）
     parse_universal(t, tight, result, company)
 
     # 会社別専用パーサー
-    if company == "ファースト住建":
+    if company == "グローブホーム":
+        parse_globe(t, tight, result)
+    elif company == "ファースト住建":
         parse_first(t, tight, result)
     elif company == "阿部建設":
         parse_abe(t, tight, result)
@@ -1030,19 +958,16 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
         parse_ai(t, tight, result)
     elif company in ("(株)宮崎工務店", "(株)宮崎", "新生建設(株)"):
         parse_miyazaki_shinsei(t, tight, result)
-    elif company == "グローブホーム":
-        parse_globe(t, tight, result)
 
     # 日付補完（専用パーサーでセット済みの項目は上書きしない）
     dates = extract_dates_perfect(t, tight, company, COMPANY_LABEL_MAP.get(company, {}))
     if not result["date"]:         result["date"]         = dates.get("date")
     if not result["billing_date"]: result["billing_date"] = dates.get("billing_date")
-    # 住友不動産は parse_sumitomo で工期をセット済みなのでスキップ
-    if company not in ("住友不動産", "住友不動産ハウジング(株)", "ファースト住建"):
+    # グローブホーム・住友不動産・ファースト住建は工期を専用パーサーでセット済み
+    if company not in ("グローブホーム", "住友不動産", "住友不動産ハウジング(株)", "ファースト住建"):
         if not result["startDate"]: result["startDate"] = dates.get("startDate")
         if not result["endDate"]:   result["endDate"]   = dates.get("endDate")
 
-    # ファースト住建は工期欄が空の場合があるのでdateをstartDateに使わない
     if not result["startDate"] and result["date"] and result["company"] != "ファースト住建":
         result["startDate"] = result["date"]
 
@@ -1062,8 +987,6 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     if "浄水槽" in t and result["content"] == "注文工事":
         result["content"] = "浄水槽工事"
 
-    # 表示用フィールドを付加
     result["fields_display"] = build_display_fields(result)
-
     result.pop("config", None)
     return result
