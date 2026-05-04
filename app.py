@@ -2,6 +2,11 @@
 FINE: モダン・ダッシュボード版（タイトル横ロゴ維持版）
 抽出エンジン：ハイブリッド（直接抽出 + EasyOCR）
 UI：カスタムCSSによるデザイン強化 & タイトル横ポタポタ水道ロゴ
+
+【修正 2026-05-04】
+- 2-1列のキー名を「2-1. 契約枝番号(業者NO)」→「2-1. 現場ID/契約枝番号」に変更
+  グローブホームは現場ID、住友・他社は契約枝番号/業者NOが入る
+- EDITOR_COLUMNS・parsed_to_row・sync_data内の参照を統一
 """
 
 from __future__ import annotations
@@ -31,26 +36,21 @@ st.set_page_config(
 # カスタムCSS & アニメーション
 st.markdown("""
     <style>
-    /* メイン背景とフォント */
     .main {
         background-color: #f8f9fa;
     }
     .stApp {
         font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
     }
-    
-    /* タイトル横の水道ロゴ用設定 */
     .header-faucet-wrapper {
         display: inline-flex;
         align-items: center;
         position: relative;
         margin-left: 10px;
     }
-    
     .header-faucet-icon {
         font-size: 32px;
     }
-    
     .header-water-drop {
         position: absolute;
         top: 25px;
@@ -61,15 +61,12 @@ st.markdown("""
         border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
         animation: drip 1.5s infinite ease-in;
     }
-    
     @keyframes drip {
         0% { transform: translateY(0) scale(0.5); opacity: 0; }
         20% { transform: translateY(0) scale(1); opacity: 1; }
         80% { transform: translateY(30px) scale(1); opacity: 0.8; }
         100% { transform: translateY(40px) scale(0.2); opacity: 0; }
     }
-    
-    /* ヘッダーの装飾 */
     .main-header {
         font-size: 2.5rem;
         font-weight: 700;
@@ -78,8 +75,6 @@ st.markdown("""
         display: flex;
         align-items: center;
     }
-    
-    /* アップロードエリアの拡大カスタマイズ */
     [data-testid="stFileUploader"] {
         background-color: white;
         border: 2px dashed #cbd5e1;
@@ -95,7 +90,6 @@ st.markdown("""
         border-color: #3b82f6;
         background-color: #f1f5f9;
     }
-    /* ドラッグアンドドロップの指示テキストサイズ調整 */
     [data-testid="stFileUploader"] section {
         padding: 3rem !important;
     }
@@ -104,8 +98,6 @@ st.markdown("""
         font-weight: 600 !important;
         color: #475569 !important;
     }
-
-    /* カード型のコンテナ */
     div[data-testid="stVerticalBlock"] > div:has(div.stDataEditor) {
         background-color: white;
         padding: 1.5rem;
@@ -113,32 +105,23 @@ st.markdown("""
         border: 1px solid #e2e8f0;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
-    
-    /* ボタンのカスタマイズ */
     div.stButton > button {
         border-radius: 0.5rem;
         font-weight: 600;
         transition: all 0.2s ease;
     }
-    
-    /* サイドバーのカスタマイズ */
     section[data-testid="stSidebar"] {
         background-color: #228b22;
         color: white;
     }
-    /* 使い方セクションの文字を白にする */
-    section[data-testid="stSidebar"] .stMarkdown, 
-    section[data-testid="stSidebar"] p, 
+    section[data-testid="stSidebar"] .stMarkdown,
+    section[data-testid="stSidebar"] p,
     section[data-testid="stSidebar"] li {
         color: #ffffff !important;
     }
-
-    /* サイドバー内のボタン（表示をクリア）の文字色を青にする */
     section[data-testid="stSidebar"] .stButton button p {
         color: #60a5fa !important;
     }
-    
-    /* 成功・エラーメッセージの丸み */
     div[data-testid="stNotification"] {
         border-radius: 0.5rem;
     }
@@ -157,11 +140,8 @@ def _get_supabase() -> Client | None:
     try:
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
-        
-        # 修正：supabase-pyの新しいバージョンに対応した接続方法
         from supabase.lib.client_options import ClientOptions
         options = ClientOptions(postgrest_client_timeout=10, storage_client_timeout=10)
-        
         return create_client(url, key, options=options)
     except Exception as e:
         st.sidebar.error(f"接続エラー詳細: {e}")
@@ -170,12 +150,10 @@ def _get_supabase() -> Client | None:
 def extract_pdf_text_local(file_bytes: bytes, filename: str) -> str:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     full_text_list: list[str] = []
-    
     try:
         for i in range(doc.page_count):
             page = doc.load_page(i)
             direct_text = page.get_text("text")
-            
             if len(direct_text.strip()) > 50:
                 full_text_list.append(direct_text)
             else:
@@ -186,8 +164,8 @@ def extract_pdf_text_local(file_bytes: bytes, filename: str) -> str:
                     full_text_list.extend(result)
     finally:
         doc.close()
-    
     return "\n".join(full_text_list)
+
 
 def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
     amt = parsed.get("amount") or 0
@@ -198,33 +176,42 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
     else:
         kouki = ed or sd or "-"
 
-    # 変更点：各社の呼び方を併記して分かりやすくしました
     return {
         "送信": False,
         "ファイル名": filename,
-        "1. 元請名所": parsed.get("company") or "不明",
-        "2. 契約番号(注文/工事)": parsed.get("id") or "-",
-        "2-1. 契約枝番号(業者NO)": parsed.get("client_code2") or "",
-        "2-2. 発注枝番": parsed.get("client_code3") or "",
-        "3. 現場名(事業名)": parsed.get("site_name") or "-",
-        "3-1. 工事名(邸名)": parsed.get("koji_name") or parsed.get("site_name") or "-",
-        "4. 施工場所(現場住所)": parsed.get("address") or "-",
-        "5. 代金(金額)": int(amt) if isinstance(amt, (int, float)) else amt,
-        "6. 工事件名(内容/名称)": parsed.get("content") or "不明",
-        "7. 注文書年月日(発注日)": parsed.get("date") or "-",
-        "8. 工期": kouki,
-        "9. 請求日": parsed.get("billing_date") or "",
-        "10. 注文書種類": parsed.get("docType") or "注文書",
-        "注文No(F18)": "-",
-        "ステータス": "未送信",
-        "fields_display": parsed.get("fields_display", {})  # 内部保存用のデータも保持
+        "1. 元請名所":              parsed.get("company") or "不明",
+        "2. 契約番号(注文/工事)":   parsed.get("id") or "-",
+        # グローブホーム→現場ID / 住友・他社→契約枝番号・業者NO
+        "2-1. 現場ID/契約枝番号":   parsed.get("client_code2") or "",
+        "2-2. 発注枝番":            parsed.get("client_code3") or "",
+        "3. 現場名(事業名)":        parsed.get("site_name") or "-",
+        "3-1. 工事名(邸名)":        parsed.get("koji_name") or parsed.get("site_name") or "-",
+        "4. 施工場所(現場住所)":     parsed.get("address") or "-",
+        "5. 代金(金額)":            int(amt) if isinstance(amt, (int, float)) else amt,
+        "6. 工事件名(内容/名称)":    parsed.get("content") or "不明",
+        "7. 注文書年月日(発注日)":   parsed.get("date") or "-",
+        "8. 工期":                  kouki,
+        "9. 請求日":                parsed.get("billing_date") or "",
+        "10. 注文書種類":           parsed.get("docType") or "注文書",
+        "注文No(F18)":             "-",
+        "ステータス":               "未送信",
+        "fields_display":          parsed.get("fields_display", {}),
     }
 
-# 変更点：表示列の定義を番号付き・併記のキー名に合わせて修正
+
+# 表示列定義（2-1列名を統一）
 EDITOR_COLUMNS = [
-    "送信", "ファイル名", "1. 元請名所", "2. 契約番号(注文/工事)", "2-1. 契約枝番号(業者NO)", "2-2. 発注枝番", 
-    "3. 現場名(事業名)", "3-1. 工事名(邸名)", "4. 施工場所(現場住所)", "5. 代金(金額)", "6. 工事件名(内容/名称)", "7. 注文書年月日(発注日)", "8. 工期", "9. 請求日", "10. 注文書種類", "注文No(F18)", "ステータス"
+    "送信", "ファイル名", "1. 元請名所",
+    "2. 契約番号(注文/工事)",
+    "2-1. 現場ID/契約枝番号",   # グローブホーム→現場ID / 他社→契約枝番号・業者NO
+    "2-2. 発注枝番",
+    "3. 現場名(事業名)", "3-1. 工事名(邸名)",
+    "4. 施工場所(現場住所)", "5. 代金(金額)",
+    "6. 工事件名(内容/名称)", "7. 注文書年月日(発注日)",
+    "8. 工期", "9. 請求日", "10. 注文書種類",
+    "注文No(F18)", "ステータス",
 ]
+
 
 # --- 4. メインアプリケーション ---
 def main() -> None:
@@ -241,7 +228,7 @@ def main() -> None:
                 st.rerun()
             else:
                 st.error("パスワードが正しくありません")
-        return  # 認証されるまでこれ以降のコード（OCR画面）は実行しない
+        return
 
     # 状態の初期化
     if "fine_rows" not in st.session_state:
@@ -253,16 +240,15 @@ def main() -> None:
 
     with st.sidebar:
         st.image("https://img.icons8.com/fluency/96/database.png", width=60)
-        # 「FINE Sync」から「同期メニュー」へ変更
         st.title("同期メニュー")
         st.markdown("---")
-        
+
         supabase = _get_supabase()
         if supabase:
             st.success("● クラウドに接続済み")
         else:
             st.error("○ オフライン（保存不可）")
-            
+
         st.markdown("### 使い方")
         st.write("""
         1. PDFをアップロード
@@ -270,14 +256,13 @@ def main() -> None:
         3. 同期対象にチェック
         4. ボタンを押して送信
         """)
-        
+
         if st.button("表示をクリア"):
             st.session_state.fine_rows = []
             st.session_state.raw_texts = {}
-            st.session_state.uploader_key += 1 # アップローダーをリセット
+            st.session_state.uploader_key += 1
             st.rerun()
-            
-        # サイドバー下段にシステム名を表示（フォントサイズを大幅に拡大）
+
         st.markdown("<br><br><br>", unsafe_allow_html=True)
         st.markdown("---")
         st.markdown("""
@@ -288,7 +273,6 @@ def main() -> None:
             </div>
         """, unsafe_allow_html=True)
 
-    # タイトル部分にインラインで水道ロゴを配置、タイトル名を変更
     st.markdown("""
         <div class="main-header">
             元請注文書読み込みシステム
@@ -300,7 +284,6 @@ def main() -> None:
     """, unsafe_allow_html=True)
     st.caption("高性能OCR解析 ＆ 基幹システム同期ツール")
 
-    # アップロード場所の改善（uploader_key を使用してリセット可能にする）
     uploaded = st.file_uploader(
         "PDFファイルをここにドラッグ＆ドロップしてください",
         type=["pdf"],
@@ -313,27 +296,25 @@ def main() -> None:
         new_rows: list[dict[str, Any]] = []
         progress_text = st.empty()
         bar = st.progress(0)
-        
+
         for idx, uf in enumerate(uploaded):
-            # すでに解析済みのファイルはスキップ（重複防止）
             if any(row["ファイル名"] == uf.name for row in st.session_state.fine_rows):
                 continue
 
             progress_text.text(f"解析中 ({idx+1}/{len(uploaded)}): {uf.name}")
             bar.progress((idx + 1) / len(uploaded))
-            
+
             raw_bytes = uf.read()
             extracted_text = extract_pdf_text_local(raw_bytes, uf.name)
-            
             st.session_state.raw_texts[uf.name] = extracted_text
-            
+
             parsed = parse_ocr_text(extracted_text, uf.name)
             new_rows.append(parsed_to_row(uf.name, parsed))
-        
+
         if new_rows:
             st.session_state.fine_rows.extend(new_rows)
             st.toast(f"{len(new_rows)} 件の解析が完了しました！", icon="✅")
-        
+
         progress_text.empty()
         bar.empty()
 
@@ -346,7 +327,7 @@ def main() -> None:
         return
 
     df = pd.DataFrame(st.session_state.fine_rows)
-    
+
     m1, m2 = st.columns(2)
     with m1:
         st.metric("解析済み件数", f"{len(df)} 件")
@@ -357,7 +338,6 @@ def main() -> None:
     tab1, tab2 = st.tabs(["📋 データ編集・送信", "📄 抽出テキスト確認"])
 
     with tab1:
-        # ★ ここに大きな警告テキストを追加しました ★
         st.markdown("""
             <div style="background-color: #fee2e2; border-left: 6px solid #ef4444; padding: 1rem; margin-bottom: 1rem; border-radius: 0.5rem;">
                 <p style="color: #b91c1c; font-size: 1.35rem; font-weight: bold; margin: 0;">
@@ -370,30 +350,28 @@ def main() -> None:
             df[EDITOR_COLUMNS],
             use_container_width=True,
             num_rows="dynamic",
-            # 変更点：代金のキー名を併記フォーマットに変更
             column_config={
                 "送信": st.column_config.CheckboxColumn("送信", default=False),
                 "5. 代金(金額)": st.column_config.NumberColumn("5. 代金(金額)", format="¥%d"),
                 "ステータス": st.column_config.SelectboxColumn(
                     "ステータス", options=["未送信", "完了", "エラー"], disabled=True
-                )
+                ),
             },
             hide_index=True,
             key="main_editor"
         )
 
         st.markdown("<br/>", unsafe_allow_html=True)
-        
+
         btn_col1, btn_col2, btn_col3 = st.columns(3)
-        
+
         with btn_col1:
-            # ボタン名も「クラウドへ送信」など分かりやすく変更可能
             if st.button("🔥 クラウドへデータ送信", type="primary", use_container_width=True):
                 if not supabase:
                     st.error("接続設定が見つかりません。")
                 else:
                     sync_data(edited_df, supabase)
-        
+
         with btn_col2:
             csv = edited_df.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
@@ -410,9 +388,10 @@ def main() -> None:
                 with st.expander(f"👁️ {fname}"):
                     st.text_area("Raw Text", txt, height=300, key=f"raw_{fname}", label_visibility="collapsed")
 
+
 def sync_data(edf: pd.DataFrame, supabase: Client):
     to_sync = edf[(edf["送信"] == True) & (edf["ステータス"] != "完了")]
-    
+
     if to_sync.empty:
         st.warning("送信対象が選択されていません（チェックボックスを入れてください）")
         return
@@ -420,7 +399,7 @@ def sync_data(edf: pd.DataFrame, supabase: Client):
     success_count = 0
     with st.spinner("同期中..."):
         current_counter = get_max_f18_counter(supabase)
-        
+
         for idx, row in to_sync.iterrows():
             try:
                 f18_code, current_counter = next_unique_f18(supabase, current_counter)
@@ -438,6 +417,7 @@ def sync_data(edf: pd.DataFrame, supabase: Client):
         st.success(f"✅ {success_count} 件のデータを同期しました。")
         time.sleep(2)
         st.rerun()
+
 
 if __name__ == "__main__":
     main()

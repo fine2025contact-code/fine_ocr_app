@@ -7,6 +7,10 @@ projects → orders → order_items の順で挿入し、F18 の採番を行う�
 【バグ修正】
 - get_max_f18_counter: data はリストなので data[0].get(...) に修正
 - insert_fine_row: proj_data["id"] → proj_data[0]["id"]、order_data["id"] → order_data[0]["id"] に修正
+
+【列名修正 2026-05-04】
+- code_no2 の参照キーを「2-1. 契約枝番号(業者NO)」→「2-1. 現場ID/契約枝番号」に変更
+  （app.py の parsed_to_row・EDITOR_COLUMNS と統一）
 """
 
 from __future__ import annotations
@@ -43,7 +47,6 @@ def get_max_f18_counter(supabase: Client) -> int:
         )
         data = getattr(res, "data", None) or []
         if isinstance(data, list) and len(data) > 0:
-            # 【修正】data はリストなので [0] でアクセス
             return _parse_f18_counter(data[0].get("order_custom_no"))
     except Exception:
         pass
@@ -122,16 +125,30 @@ def insert_fine_row(
 ) -> None:
     """
     1行を projects / orders / order_items に登録。
-    UI（画面）で編集された値を最優先で反映するよう列名をマッピングしています。
+    UI（画面）で編集された値を最優先で反映するよう列名をマッピング。
+
+    【列名対応表】
+    app.py キー                    → DB フィールド
+    ----------------------------------------
+    1. 元請名所                    → client_name
+    2. 契約番号(注文/工事)         → client_code1 / order_custom_no(F18)
+    2-1. 現場ID/契約枝番号         → client_code2  ★修正（旧: 2-1. 契約枝番号(業者NO)）
+    2-2. 発注枝番                  → client_code3
+    3. 現場名(事業名)              → name（現場名部分）
+    4. 施工場所(現場住所)          → site_address
+    5. 代金(金額)                  → budget / unit_price
+    6. 工事件名(内容/名称)         → description
+    7. 注文書年月日(発注日)        → order_date
+    8. 工期                        → end_date
+    10. 注文書種類                 → description（接頭辞）
     """
-    # 内部保存用データ（画面に表示されない予備データ等）
     fd = row.get("fields_display", {}) or {}
 
-    # 1. 日付 (UI: 7. 注文書年月日(発注日))
+    # 1. 日付
     raw_date = row.get("7. 注文書年月日(発注日)") or fd.get("no7_date") or row.get("date")
     iso_date = _iso_date_from_cell(raw_date)
 
-    # 2. 会社名 (UI: 1. 元請名所)
+    # 2. 会社名
     moto_name = str(
         row.get("1. 元請名所") or
         fd.get("no1_company") or
@@ -140,11 +157,10 @@ def insert_fine_row(
     )
     client_id = resolve_client_id(moto_name)
 
-    # 3. 工事名・現場名 (UI: 3. 現場名(事業名), 3-1. 工事名(邸名), 6. 工事件名(内容/名称))
+    # 3. 工事名・現場名
     raw_site    = row.get("3. 現場名(事業名)") or row.get("3-1. 工事名(邸名)") or fd.get("no3_site_name") or ""
     raw_content = row.get("6. 工事件名(内容/名称)") or fd.get("no6_content") or "名称未設定"
 
-    # 現場名と工事件名が別の場合は結合
     if raw_site and raw_site not in raw_content:
         name = f"{raw_site} {raw_content}".strip()
     else:
@@ -152,7 +168,8 @@ def insert_fine_row(
 
     # 4. 番号類
     code_no1 = str(row.get("2. 契約番号(注文/工事)") or fd.get("no2_id") or "")
-    code_no2 = str(row.get("2-1. 契約枝番号(業者NO)") or fd.get("no2_1_code2") or "")
+    # ★ 列名を「2-1. 現場ID/契約枝番号」に統一（旧: 2-1. 契約枝番号(業者NO)）
+    code_no2 = str(row.get("2-1. 現場ID/契約枝番号") or fd.get("no2_1_code2") or "")
     code_no3 = str(row.get("2-2. 発注枝番") or fd.get("no2_2_code3") or "")
 
     # 5. 住所・金額・工期
@@ -166,7 +183,7 @@ def insert_fine_row(
 
     # 6. 書類タイプ
     doc_type  = row.get("10. 注文書種類") or fd.get("no10_doc_type") or ""
-    order_desc = f"【{doc_type}】 {name}" if doc_type and doc_type != "注文書" else name
+    order_desc = f"【{doc_type}】 {name}" if doc_type and doc_type not in ("注文書", "") else name
 
     # --- DB登録 ---
     project_body: dict[str, Any] = {
@@ -184,7 +201,6 @@ def insert_fine_row(
     proj_data = getattr(proj_res, "data", None) or []
     if not proj_data:
         raise RuntimeError("案件（projects）の作成に失敗しました。")
-    # 【修正】proj_data はリストなので [0] でアクセス
     new_project_id = proj_data[0]["id"]
 
     order_body: dict[str, Any] = {
@@ -202,7 +218,6 @@ def insert_fine_row(
     order_data = getattr(order_res, "data", None) or []
     if not order_data:
         raise RuntimeError("注文（orders）の作成に失敗しました。")
-    # 【修正】order_data はリストなので [0] でアクセス
     new_order_id = order_data[0]["id"]
 
     item_body: dict[str, Any] = {
