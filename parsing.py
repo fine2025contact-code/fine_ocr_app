@@ -649,8 +649,11 @@ def parse_sumitomo(t: str, tight: str, result: dict):
         result['endDate']   = _slash_to_fmt(m_kouki.group(2))
 
     # 10. 書類種別
+    # 優先順位: B表 > 追加注文書(電子契約) > 注文書
     if 'B 表' in t or 'B表' in t:
         result['docType'] = 'B表（追加注文書）'
+    elif re.search(r'追加注文書\s*\(電子契約\)', t):
+        result['docType'] = '追加注文書'
     else:
         result['docType'] = '注文書'
 
