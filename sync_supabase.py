@@ -118,6 +118,19 @@ def _db_end_date_from_k(val: Any) -> str | None:
     return f"{y:04d}-{mo:02d}-{d:02d}"
 
 
+def _db_start_date_from_k(val: Any) -> str | None:
+    """工期/納期から start_date 用の日付文字列を推定（最初の日付を採用）"""
+    t = str(val) if val is not None else ""
+    if not t.strip() or t.strip() == "-":
+        return None
+    ms = list(re.finditer(r"(\d{4})[/\-\.年](\d{1,2})[/\-\.月](\d{1,2})", t))
+    if not ms:
+        return None
+    m = ms[0]
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    return f"{y:04d}-{mo:02d}-{d:02d}"
+
+
 def insert_fine_row(
     supabase: Client,
     row: dict[str, Any],
@@ -178,8 +191,9 @@ def insert_fine_row(
         row.get("5. 代金(金額)") or fd.get("no5_amount") or 0
     )
 
-    raw_end = row.get("8. 工期") or fd.get("no8_kouki")
-    db_end = _db_end_date_from_k(raw_end) if raw_end else None
+    raw_kouki = row.get("8. 工期") or fd.get("no8_kouki")
+    db_end   = _db_end_date_from_k(raw_kouki) if raw_kouki else None
+    db_start = _db_start_date_from_k(raw_kouki) if raw_kouki else None
 
     # 6. 書類タイプ
     doc_type  = row.get("10. 注文書種類") or fd.get("no10_doc_type") or ""
@@ -193,6 +207,7 @@ def insert_fine_row(
         "budget": budget,
         "code_no1": code_no1,
         "site_address": site_address,
+        "start_date": db_start,
         "end_date": db_end,
         "status": "active",
     }
