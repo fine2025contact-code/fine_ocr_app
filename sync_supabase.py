@@ -185,6 +185,9 @@ def insert_fine_row(
     db_start = _db_start_date_from_k(raw_kouki) if raw_kouki else iso_date
 
     # ★ projects テーブルのみに登録（orders/order_itemsは登録しない）
+    # ★ 送信担当者（app.pyから渡される）
+    sent_by = row.get("sent_by", "")
+
     project_body: dict[str, Any] = {
         "name": name,
         "client_id": client_id,
@@ -197,6 +200,7 @@ def insert_fine_row(
         "start_date": db_start,
         "end_date": db_end,
         "status": "active",
+        "sent_by": sent_by,  # ★ 送信担当者を保存
     }
 
     proj_res = supabase.table("projects").insert(project_body).execute()

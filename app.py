@@ -3,10 +3,10 @@ FINE: モダン・ダッシュボード版（タイトル横ロゴ維持版）
 抽出エンジン：ハイブリッド（直接抽出 + EasyOCR）
 UI：カスタムCSSによるデザイン強化 & タイトル横ポタポタ水道ロゴ
 
-【修正 2026-05-04】
-- 2-1列のキー名を「2-1. 契約枝番号(業者NO)」→「2-1. 現場ID/契約枝番号」に変更
-  グローブホームは現場ID、住友・他社は契約枝番号/業者NOが入る
-- EDITOR_COLUMNS・parsed_to_row・sync_data内の参照を統一
+【修正 2026-05-06】
+- 送信前に担当者選択を必須化（staff_mastersから取得）
+- 担当者未選択の場合は送信ボタンを無効化
+- 送信済みデータにsent_byカラムを追加
 """
 
 from __future__ import annotations
@@ -21,11 +21,9 @@ import numpy as np
 import easyocr
 from supabase import Client, create_client
 
-# 安定版の解析ロジックをインポート
 from parsing import parse_ocr_text
 from sync_supabase import get_max_f18_counter, insert_fine_row, next_unique_f18
 
-# --- 1. ページ設定とデザイン ---
 st.set_page_config(
     page_title="FINE OCR",
     page_icon="📄",
@@ -33,30 +31,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# カスタムCSS & アニメーション
 st.markdown("""
     <style>
-    .main {
-        background-color: #f8f9fa;
-    }
-    .stApp {
-        font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
-    }
+    .main { background-color: #f8f9fa; }
+    .stApp { font-family: 'Inter', 'Segoe UI', Roboto, sans-serif; }
     .header-faucet-wrapper {
-        display: inline-flex;
-        align-items: center;
-        position: relative;
-        margin-left: 10px;
+        display: inline-flex; align-items: center;
+        position: relative; margin-left: 10px;
     }
-    .header-faucet-icon {
-        font-size: 32px;
-    }
+    .header-faucet-icon { font-size: 32px; }
     .header-water-drop {
-        position: absolute;
-        top: 25px;
-        left: 8px;
-        width: 6px;
-        height: 10px;
+        position: absolute; top: 25px; left: 8px;
+        width: 6px; height: 10px;
         background-color: #3b82f6;
         border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
         animation: drip 1.5s infinite ease-in;
@@ -68,74 +54,55 @@ st.markdown("""
         100% { transform: translateY(40px) scale(0.2); opacity: 0; }
     }
     .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
-        color: #1e293b;
-        margin-bottom: 0.5rem;
-        display: flex;
-        align-items: center;
+        font-size: 2.5rem; font-weight: 700; color: #1e293b;
+        margin-bottom: 0.5rem; display: flex; align-items: center;
     }
     [data-testid="stFileUploader"] {
-        background-color: white;
-        border: 2px dashed #cbd5e1;
-        border-radius: 1rem;
-        padding: 2rem;
-        transition: all 0.3s ease;
-        min-height: 250px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        background-color: white; border: 2px dashed #cbd5e1;
+        border-radius: 1rem; padding: 2rem; transition: all 0.3s ease;
+        min-height: 250px; display: flex; align-items: center; justify-content: center;
     }
     [data-testid="stFileUploader"]:hover {
-        border-color: #3b82f6;
-        background-color: #f1f5f9;
+        border-color: #3b82f6; background-color: #f1f5f9;
     }
-    [data-testid="stFileUploader"] section {
-        padding: 3rem !important;
-    }
+    [data-testid="stFileUploader"] section { padding: 3rem !important; }
     [data-testid="stFileUploader"] section > label {
-        font-size: 1.2rem !important;
-        font-weight: 600 !important;
-        color: #475569 !important;
+        font-size: 1.2rem !important; font-weight: 600 !important; color: #475569 !important;
     }
     div[data-testid="stVerticalBlock"] > div:has(div.stDataEditor) {
-        background-color: white;
-        padding: 1.5rem;
-        border-radius: 0.75rem;
-        border: 1px solid #e2e8f0;
+        background-color: white; padding: 1.5rem;
+        border-radius: 0.75rem; border: 1px solid #e2e8f0;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
-    div.stButton > button {
-        border-radius: 0.5rem;
-        font-weight: 600;
-        transition: all 0.2s ease;
-    }
-    section[data-testid="stSidebar"] {
-        background-color: #00AEEF;
-        color: white;
-    }
+    div.stButton > button { border-radius: 0.5rem; font-weight: 600; transition: all 0.2s ease; }
+    section[data-testid="stSidebar"] { background-color: #00AEEF; color: white; }
     section[data-testid="stSidebar"] .stMarkdown,
     section[data-testid="stSidebar"] p,
-    section[data-testid="stSidebar"] li {
-        color: #ffffff !important;
+    section[data-testid="stSidebar"] li { color: #ffffff !important; }
+    section[data-testid="stSidebar"] .stButton button p { color: #60a5fa !important; }
+
+    /* ★ 担当者選択エリアのスタイル */
+    .staff-selector {
+        background: linear-gradient(135deg, #eff6ff, #f0fdf4);
+        border: 2px solid #3b82f6; border-radius: 0.75rem;
+        padding: 1.2rem 1.5rem; margin-bottom: 1rem;
     }
-    section[data-testid="stSidebar"] .stButton button p {
-        color: #60a5fa !important;
-    }
-    div[data-testid="stNotification"] {
-        border-radius: 0.5rem;
+    .staff-required {
+        background: linear-gradient(135deg, #fef2f2, #fff7ed);
+        border: 2px solid #ef4444; border-radius: 0.75rem;
+        padding: 1.2rem 1.5rem; margin-bottom: 1rem;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. OCRエンジンの初期化 ---
+
 @st.cache_resource
 def load_ocr():
     return easyocr.Reader(['ja', 'en'], gpu=False)
 
 ocr_reader = load_ocr()
 
-# --- 3. ユーティリティ ---
+
 def _get_supabase() -> Client | None:
     try:
         url = st.secrets["SUPABASE_URL"]
@@ -146,6 +113,21 @@ def _get_supabase() -> Client | None:
     except Exception as e:
         st.sidebar.error(f"接続エラー詳細: {e}")
         return None
+
+
+# ★ staff_masters から担当者リストを取得
+@st.cache_data(ttl=300)
+def fetch_staff_list() -> list[str]:
+    try:
+        supabase = _get_supabase()
+        if not supabase:
+            return []
+        res = supabase.table("staff_masters").select("name").order("name").execute()
+        return [row["name"] for row in (res.data or [])]
+    except Exception as e:
+        st.sidebar.warning(f"担当者取得エラー: {e}")
+        return []
+
 
 def extract_pdf_text_local(file_bytes: bytes, filename: str) -> str:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
@@ -181,7 +163,6 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
         "ファイル名": filename,
         "1. 元請名所":              parsed.get("company") or "不明",
         "2. 契約番号(注文/工事)":   parsed.get("id") or "-",
-        # グローブホーム→現場ID / 住友・他社→契約枝番号・業者NO
         "2-1. 現場ID/契約枝番号":   parsed.get("client_code2") or "",
         "2-2. 発注枝番":            parsed.get("client_code3") or "",
         "3. 現場名(事業名)":        parsed.get("site_name") or "-",
@@ -199,11 +180,10 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# 表示列定義（2-1列名を統一）
 EDITOR_COLUMNS = [
     "送信", "ファイル名", "1. 元請名所",
     "2. 契約番号(注文/工事)",
-    "2-1. 現場ID/契約枝番号",   # グローブホーム→現場ID / 他社→契約枝番号・業者NO
+    "2-1. 現場ID/契約枝番号",
     "2-2. 発注枝番",
     "3. 現場名(事業名)", "3-1. 工事名(邸名)",
     "4. 施工場所(現場住所)", "5. 代金(金額)",
@@ -213,9 +193,8 @@ EDITOR_COLUMNS = [
 ]
 
 
-# --- 4. メインアプリケーション ---
 def main() -> None:
-    # --- パスワード認証機能 ---
+    # パスワード認証
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
@@ -237,6 +216,9 @@ def main() -> None:
         st.session_state.raw_texts = {}
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
+    # ★ 送信担当者の初期化
+    if "selected_staff" not in st.session_state:
+        st.session_state.selected_staff = ""
 
     with st.sidebar:
         st.image("https://img.icons8.com/fluency/96/database.png", width=60)
@@ -253,8 +235,9 @@ def main() -> None:
         st.write("""
         1. PDFをアップロード
         2. 抽出内容を確認・修正
-        3. 同期対象にチェック
-        4. ボタンを押して送信
+        3. **送信担当者を選択**（必須）
+        4. 同期対象にチェック
+        5. ボタンを押して送信
         """)
 
         if st.button("表示をクリア"):
@@ -346,6 +329,45 @@ def main() -> None:
             </div>
         """, unsafe_allow_html=True)
 
+        # ★ 送信担当者選択（必須）
+        staff_list = fetch_staff_list()
+        staff_options = [""] + staff_list
+
+        selected_staff = st.session_state.selected_staff
+        is_staff_selected = bool(selected_staff)
+
+        if is_staff_selected:
+            st.markdown(f"""
+                <div class="staff-selector">
+                    <p style="margin:0; font-size:1.1rem; font-weight:800; color:#1d4ed8;">
+                        ✅ 送信担当者：{selected_staff}
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+                <div class="staff-required">
+                    <p style="margin:0; font-size:1.1rem; font-weight:800; color:#dc2626;">
+                        ⚠️ 送信担当者を選択してください（必須）
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+
+        col_staff, col_spacer = st.columns([2, 3])
+        with col_staff:
+            new_staff = st.selectbox(
+                "📋 送信担当者",
+                options=staff_options,
+                index=staff_options.index(selected_staff) if selected_staff in staff_options else 0,
+                format_func=lambda x: "担当者を選択してください..." if x == "" else x,
+                key="staff_selectbox"
+            )
+            if new_staff != selected_staff:
+                st.session_state.selected_staff = new_staff
+                st.rerun()
+
+        st.markdown("<br/>", unsafe_allow_html=True)
+
         edited_df = st.data_editor(
             df[EDITOR_COLUMNS],
             use_container_width=True,
@@ -366,11 +388,18 @@ def main() -> None:
         btn_col1, btn_col2, btn_col3 = st.columns(3)
 
         with btn_col1:
-            if st.button("🔥 クラウドへデータ送信", type="primary", use_container_width=True):
+            # ★ 担当者未選択の場合はボタンを無効化
+            send_disabled = not is_staff_selected
+            if st.button(
+                "🔥 クラウドへデータ送信" if is_staff_selected else "🔒 担当者を選択してから送信",
+                type="primary",
+                use_container_width=True,
+                disabled=send_disabled
+            ):
                 if not supabase:
                     st.error("接続設定が見つかりません。")
                 else:
-                    sync_data(edited_df, supabase)
+                    sync_data(edited_df, supabase, st.session_state.selected_staff)
 
         with btn_col2:
             csv = edited_df.to_csv(index=False).encode('utf-8-sig')
@@ -389,21 +418,29 @@ def main() -> None:
                     st.text_area("Raw Text", txt, height=300, key=f"raw_{fname}", label_visibility="collapsed")
 
 
-def sync_data(edf: pd.DataFrame, supabase: Client):
+def sync_data(edf: pd.DataFrame, supabase: Client, sent_by: str):
     to_sync = edf[(edf["送信"] == True) & (edf["ステータス"] != "完了")]
 
     if to_sync.empty:
         st.warning("送信対象が選択されていません（チェックボックスを入れてください）")
         return
 
+    # ★ 担当者チェック（二重確認）
+    if not sent_by:
+        st.error("送信担当者が選択されていません。担当者を選択してから送信してください。")
+        return
+
     success_count = 0
-    with st.spinner("同期中..."):
+    with st.spinner(f"同期中... （送信担当者：{sent_by}）"):
         current_counter = get_max_f18_counter(supabase)
 
         for idx, row in to_sync.iterrows():
             try:
                 f18_code, current_counter = next_unique_f18(supabase, current_counter)
-                insert_fine_row(supabase, row.to_dict(), f18_code)
+                # ★ sent_by を row に追加して insert_fine_row に渡す
+                row_dict = row.to_dict()
+                row_dict["sent_by"] = sent_by
+                insert_fine_row(supabase, row_dict, f18_code)
                 edf.at[idx, "注文No(F18)"] = f18_code
                 edf.at[idx, "ステータス"] = "完了"
                 edf.at[idx, "送信"] = False
@@ -414,7 +451,7 @@ def sync_data(edf: pd.DataFrame, supabase: Client):
 
     st.session_state.fine_rows = edf.to_dict("records")
     if success_count > 0:
-        st.success(f"✅ {success_count} 件のデータを同期しました。")
+        st.success(f"✅ {success_count} 件のデータを同期しました。（送信担当者：{sent_by}）")
         time.sleep(2)
         st.rerun()
 
