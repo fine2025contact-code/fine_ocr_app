@@ -1,16 +1,23 @@
 """
-GAS processSingleRowToSupabase / sendCheckedRows に相当する Supabase 同期。
-projects → orders → order_items の順で挿入し、F18 の採番を行う。
-※最新のOCR抽出辞書（site_name, billing_date, docType等）対応版
-※fields_display（1〜10表示項目）対応版
+FINE: Supabase同期モジュール（修正版）
 
-【バグ修正】
-- get_max_f18_counter: data はリストなので data[0].get(...) に修正
-- insert_fine_row: proj_data["id"] → proj_data[0]["id"]、order_data["id"] → order_data[0]["id"] に修正
+【変更内容】
+- insert_fine_row から orders / order_items への書き込みを削除
+- projects テーブルへの書き込みのみ行う
+- 振り分け画面から F番号で発注書を作成する設計に統一
 
-【列名修正 2026-05-04】
-- code_no2 の参照キーを「2-1. 契約枝番号(業者NO)」→「2-1. 現場ID/契約枝番号」に変更
-  （app.py の parsed_to_row・EDITOR_COLUMNS と統一）
+【列名対応表】
+app.py キー                    → DB フィールド
+----------------------------------------
+1. 元請名所                    → client_name
+2. 契約番号(注文/工事)         → code_no1
+2-1. 現場ID/契約枝番号         → code_no2
+2-2. 発注枝番                  → code_no3
+3. 現場名(事業名)              → name
+4. 施工場所(現場住所)          → site_address
+5. 代金(金額)                  → budget
+7. 注文書年月日(発注日)        → start_date
+8. 工期                        → end_date
 """
 
 from __future__ import annotations
@@ -35,7 +42,7 @@ def _parse_f18_counter(last_no: str | None) -> int:
 
 
 def get_max_f18_counter(supabase: Client) -> int:
-    """DB上の F18* の最大番号に対応するカウンタ"""
+    """DB上の F18* の最大番号に対応するカウンタ（互換性のため残す）"""
     try:
         res = (
             supabase.table("orders")
@@ -66,7 +73,7 @@ def f18_exists(supabase: Client, f18: str) -> bool:
 
 
 def next_unique_f18(supabase: Client, start_counter: int) -> tuple[str, int]:
-    """F18 + 下4桁で重複しない番号を返す"""
+    """互換性のため残す（OCRアプリ側では使用しない）"""
     c = start_counter
     while True:
         c += 1
@@ -106,7 +113,6 @@ def _iso_date_from_cell(val: Any) -> str:
 
 
 def _db_end_date_from_k(val: Any) -> str | None:
-    """工期/納期から end_date 用の日付文字列を推定（最後の日付を採用）"""
     t = str(val) if val is not None else ""
     if not t.strip() or t.strip() == "-":
         return None
@@ -119,7 +125,6 @@ def _db_end_date_from_k(val: Any) -> str | None:
 
 
 def _db_start_date_from_k(val: Any) -> str | None:
-    """工期/納期から start_date 用の日付文字列を推定（最初の日付を採用）"""
     t = str(val) if val is not None else ""
     if not t.strip() or t.strip() == "-":
         return None
@@ -134,26 +139,11 @@ def _db_start_date_from_k(val: Any) -> str | None:
 def insert_fine_row(
     supabase: Client,
     row: dict[str, Any],
-    f18: str,
+    f18: str,  # ★ 互換性のため引数は残すが使用しない
 ) -> None:
     """
-    1行を projects / orders / order_items に登録。
-    UI（画面）で編集された値を最優先で反映するよう列名をマッピング。
-
-    【列名対応表】
-    app.py キー                    → DB フィールド
-    ----------------------------------------
-    1. 元請名所                    → client_name
-    2. 契約番号(注文/工事)         → client_code1 / order_custom_no(F18)
-    2-1. 現場ID/契約枝番号         → client_code2  ★修正（旧: 2-1. 契約枝番号(業者NO)）
-    2-2. 発注枝番                  → client_code3
-    3. 現場名(事業名)              → name（現場名部分）
-    4. 施工場所(現場住所)          → site_address
-    5. 代金(金額)                  → budget / unit_price
-    6. 工事件名(内容/名称)         → description
-    7. 注文書年月日(発注日)        → order_date
-    8. 工期                        → end_date
-    10. 注文書種類                 → description（接頭辞）
+    OCR読み取りデータを projects テーブルのみに登録。
+    orders / order_items への書き込みは振り分け画面で行う。
     """
     fd = row.get("fields_display", {}) or {}
 
@@ -179,9 +169,8 @@ def insert_fine_row(
     else:
         name = str(raw_content)
 
-    # 4. 番号類
+    # 4. 番号類（振り分け画面での参照用に保存）
     code_no1 = str(row.get("2. 契約番号(注文/工事)") or fd.get("no2_id") or "")
-    # ★ 列名を「2-1. 現場ID/契約枝番号」に統一（旧: 2-1. 契約枝番号(業者NO)）
     code_no2 = str(row.get("2-1. 現場ID/契約枝番号") or fd.get("no2_1_code2") or "")
     code_no3 = str(row.get("2-2. 発注枝番") or fd.get("no2_2_code3") or "")
 
@@ -193,19 +182,17 @@ def insert_fine_row(
 
     raw_kouki = row.get("8. 工期") or fd.get("no8_kouki")
     db_end   = _db_end_date_from_k(raw_kouki) if raw_kouki else None
-    db_start = _db_start_date_from_k(raw_kouki) if raw_kouki else None
+    db_start = _db_start_date_from_k(raw_kouki) if raw_kouki else iso_date
 
-    # 6. 書類タイプ
-    doc_type  = row.get("10. 注文書種類") or fd.get("no10_doc_type") or ""
-    order_desc = f"【{doc_type}】 {name}" if doc_type and doc_type not in ("注文書", "") else name
-
-    # --- DB登録 ---
+    # ★ projects テーブルのみに登録（orders/order_itemsは登録しない）
     project_body: dict[str, Any] = {
         "name": name,
         "client_id": client_id,
         "client_name": moto_name,
         "budget": budget,
         "code_no1": code_no1,
+        "code_no2": code_no2,
+        "code_no3": code_no3,
         "site_address": site_address,
         "start_date": db_start,
         "end_date": db_end,
@@ -216,32 +203,6 @@ def insert_fine_row(
     proj_data = getattr(proj_res, "data", None) or []
     if not proj_data:
         raise RuntimeError("案件（projects）の作成に失敗しました。")
-    new_project_id = proj_data[0]["id"]
 
-    order_body: dict[str, Any] = {
-        "project_id": new_project_id,
-        "order_date": iso_date,
-        "order_custom_no": f18,
-        "client_code1": code_no1,
-        "client_code2": code_no2,
-        "client_code3": code_no3,
-        "description": order_desc,
-        "status": "active",
-    }
-
-    order_res = supabase.table("orders").insert(order_body).execute()
-    order_data = getattr(order_res, "data", None) or []
-    if not order_data:
-        raise RuntimeError("注文（orders）の作成に失敗しました。")
-    new_order_id = order_data[0]["id"]
-
-    item_body: dict[str, Any] = {
-        "order_id": new_order_id,
-        "description": name,
-        "unit_price": budget,
-        "quantity": 1,
-        "unit": "式",
-        "tax_type": "税込",
-    }
-
-    supabase.table("order_items").insert(item_body).execute()
+    # ★ orders / order_items への書き込みはここで終了
+    # 発注書（F番号）は振り分け画面（OrderDistributor）で作成する
