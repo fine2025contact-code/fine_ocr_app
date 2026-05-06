@@ -200,13 +200,24 @@ def insert_fine_row(
         "start_date": db_start,
         "end_date": db_end,
         "status": "active",
-        "sent_by": sent_by,  # ★ 送信担当者を保存
     }
 
     proj_res = supabase.table("projects").insert(project_body).execute()
     proj_data = getattr(proj_res, "data", None) or []
     if not proj_data:
         raise RuntimeError("案件（projects）の作成に失敗しました。")
+    new_project_id = proj_data[0]["id"]
+
+    # ★ ocr_logs に送信記録を保存
+    ocr_log_body: dict[str, Any] = {
+        "project_id": new_project_id,
+        "sent_by": sent_by,
+        "file_name": str(row.get("ファイル名", "")),
+        "client_name": moto_name,
+        "project_name": name,
+        "amount": budget,
+    }
+    supabase.table("ocr_logs").insert(ocr_log_body).execute()
 
     # ★ orders / order_items への書き込みはここで終了
     # 発注書（F番号）は振り分け画面（OrderDistributor）で作成する
