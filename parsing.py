@@ -969,6 +969,19 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     if "浄水槽" in t and result["content"] == "注文工事":
         result["content"] = "浄水槽工事"
 
+    # ★ 枚目判定（1/2枚目、2/2枚目など）
+    m_page = re.search(r'[（(]\s*(\d+)\s*/\s*(\d+)\s*枚\s*目\s*[）)]', t)
+    if m_page:
+        current = m_page.group(1)
+        total = m_page.group(2)
+        result["docType"] = f"{result.get('docType', '注文書')} ({current}/{total}枚目)"
+    else:
+        # 「支払 1/2枚目50% 2/2枚目50%」形式も判定
+        m_shiharai = re.search(r'支\s*払.*?(\d+)/(\d+)枚目', t)
+        if m_shiharai:
+            total = m_shiharai.group(2)
+            result["docType"] = f"{result.get('docType', '注文書')} ({total}枚構成)"
+
     result["fields_display"] = build_display_fields(result)
     result.pop("config", None)
     return result

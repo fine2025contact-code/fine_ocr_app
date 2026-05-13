@@ -245,6 +245,11 @@ def main() -> None:
             st.session_state.fine_rows = []
             st.session_state.raw_texts = {}
             st.session_state.uploader_key += 1
+            # ★ 手入力フォームのstateもリセット
+            for k in ["manual_client","manual_name","manual_address",
+                       "manual_amount","manual_staff","manual_start","manual_end"]:
+                if k in st.session_state:
+                    del st.session_state[k]
             st.rerun()
 
         st.markdown("<br><br><br>", unsafe_allow_html=True)
