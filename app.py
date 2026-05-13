@@ -22,7 +22,7 @@ import easyocr
 from supabase import Client, create_client
 
 from parsing import parse_ocr_text
-from sync_supabase import get_max_f18_counter, insert_fine_row, next_unique_f18
+from sync_supabase import insert_fine_row
 
 st.set_page_config(
     page_title="FINE OCR",
@@ -338,9 +338,6 @@ def main() -> None:
                 st.error("クラウドに接続できません")
             else:
                 try:
-                    from sync_supabase import get_max_f18_counter, next_unique_f18, insert_fine_row
-                    current_counter = get_max_f18_counter(supabase_client)
-                    f18_code, _ = next_unique_f18(supabase_client, current_counter)
                     row_dict = {
                         "1. 元請名所": manual_client,
                         "3-1. 工事名(邸名)": manual_name,
@@ -359,8 +356,9 @@ def main() -> None:
                         "sent_by": manual_staff,
                         "has_client_order": False,
                     }
-                    insert_fine_row(supabase_client, row_dict, f18_code)
-                    st.success(f"✅ 登録しました！（{f18_code}）担当者：{manual_staff}")
+                    from sync_supabase import insert_fine_row as _insert
+                    _insert(supabase_client, row_dict, "")
+                    st.success(f"✅ 登録しました！担当者：{manual_staff}　※F番号は振り分け画面で割り当てられます")
                     st.balloons()
                 except Exception as e:
                     st.error(f"エラー: {e}")
@@ -442,6 +440,7 @@ def main() -> None:
                 "送信": st.column_config.CheckboxColumn("送信", default=False),
                 "元請発注書なし": st.column_config.CheckboxColumn("📄 元請発注書なし", default=False),
                 "5. 代金(金額)": st.column_config.NumberColumn("5. 代金(金額)", format="¥%d"),
+                "注文No(F18)": st.column_config.TextColumn("注文No", disabled=True, help="F番号は振り分け画面で割り当てられます"),
                 "ステータス": st.column_config.SelectboxColumn(
                     "ステータス", options=["未送信", "完了", "エラー"], disabled=True
                 ),
@@ -499,18 +498,15 @@ def sync_data(edf: pd.DataFrame, supabase: Client, sent_by: str):
 
     success_count = 0
     with st.spinner(f"同期中... （送信担当者：{sent_by}）"):
-        current_counter = get_max_f18_counter(supabase)
-
         for idx, row in to_sync.iterrows():
             try:
-                f18_code, current_counter = next_unique_f18(supabase, current_counter)
-                # ★ sent_by を row に追加して insert_fine_row に渡す
                 row_dict = row.to_dict()
                 row_dict["sent_by"] = sent_by
                 # ★ 元請発注書なしフラグを渡す
                 row_dict["has_client_order"] = not bool(row_dict.get("元請発注書なし", False))
-                insert_fine_row(supabase, row_dict, f18_code)
-                edf.at[idx, "注文No(F18)"] = f18_code
+                # ★ F番号はOCR時点では割り当てない（振り分け画面で割り当てる）
+                insert_fine_row(supabase, row_dict, "")
+                edf.at[idx, "注文No(F18)"] = "振り分け時に割当"
                 edf.at[idx, "ステータス"] = "完了"
                 edf.at[idx, "送信"] = False
                 success_count += 1
