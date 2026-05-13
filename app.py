@@ -302,6 +302,71 @@ def main() -> None:
         progress_text.empty()
         bar.empty()
 
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ★ 起動時から表示される「元請発注書なし」手入力フォーム
+    with st.expander("📝 元請発注書なし（手入力で登録）", expanded=True):
+        st.markdown("""
+            <div style="background:#fff7ed;border-left:5px solid #f97316;padding:0.7rem 1rem;border-radius:0.5rem;margin-bottom:1rem;">
+                <p style="margin:0;color:#c2410c;font-weight:bold;font-size:1rem;">
+                    📄 元請から発注書が届いていない場合はここから直接登録できます
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+
+        staff_list_manual = fetch_staff_list()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            manual_client = st.text_input("元請会社名", key="manual_client", placeholder="例：㈱アイ工務店")
+            manual_name = st.text_input("工事名（邸名）", key="manual_name", placeholder="例：田中 様邸 給排水設備工事")
+            manual_address = st.text_input("現場住所", key="manual_address", placeholder="例：愛知県名古屋市...")
+        with col_b:
+            manual_amount = st.number_input("受注額（税込）", key="manual_amount", min_value=0, step=1000, format="%d")
+            manual_staff = st.selectbox("送信担当者（必須）", options=[""] + staff_list_manual,
+                format_func=lambda x: "担当者を選択..." if x == "" else x, key="manual_staff")
+            col_date1, col_date2 = st.columns(2)
+            with col_date1:
+                manual_start = st.date_input("工期（開始）", key="manual_start", value=None)
+            with col_date2:
+                manual_end = st.date_input("工期（終了）", key="manual_end", value=None)
+
+        send_ok = bool(manual_staff and manual_client and manual_name)
+        if st.button("📤 元請発注書なしで登録・送信", type="primary",
+                     use_container_width=True, disabled=not send_ok):
+            supabase_client = _get_supabase()
+            if not supabase_client:
+                st.error("クラウドに接続できません")
+            else:
+                try:
+                    from sync_supabase import get_max_f18_counter, next_unique_f18, insert_fine_row
+                    current_counter = get_max_f18_counter(supabase_client)
+                    f18_code, _ = next_unique_f18(supabase_client, current_counter)
+                    row_dict = {
+                        "1. 元請名所": manual_client,
+                        "3-1. 工事名(邸名)": manual_name,
+                        "3. 現場名(事業名)": manual_name,
+                        "4. 施工場所(現場住所)": manual_address,
+                        "5. 代金(金額)": manual_amount,
+                        "6. 工事件名(内容/名称)": manual_name,
+                        "7. 注文書年月日(発注日)": "",
+                        "8. 工期": f"{manual_start} ~ {manual_end}" if manual_start and manual_end else "",
+                        "2. 契約番号(注文/工事)": "",
+                        "2-1. 現場ID/契約枝番号": "",
+                        "2-2. 発注枝番": "",
+                        "9. 請求日": "",
+                        "10. 注文書種類": "注文書",
+                        "ファイル名": "手入力",
+                        "sent_by": manual_staff,
+                        "has_client_order": False,
+                    }
+                    insert_fine_row(supabase_client, row_dict, f18_code)
+                    st.success(f"✅ 登録しました！（{f18_code}）担当者：{manual_staff}")
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"エラー: {e}")
+
+    st.markdown("---")
+
     if not st.session_state.fine_rows:
         st.markdown("""
         <div style="text-align: center; padding-top: 1rem; color: #94a3b8;">
