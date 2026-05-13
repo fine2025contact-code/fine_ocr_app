@@ -220,6 +220,8 @@ def main() -> None:
     # ★ 送信担当者の初期化
     if "selected_staff" not in st.session_state:
         st.session_state.selected_staff = ""
+    if "manual_form_key" not in st.session_state:
+        st.session_state.manual_form_key = 0
 
     with st.sidebar:
         st.image("https://img.icons8.com/fluency/96/database.png", width=60)
@@ -245,11 +247,8 @@ def main() -> None:
             st.session_state.fine_rows = []
             st.session_state.raw_texts = {}
             st.session_state.uploader_key += 1
-            # ★ 手入力フォームのstateもリセット
-            for k in ["manual_client","manual_name","manual_address",
-                       "manual_amount","manual_staff","manual_start","manual_end"]:
-                if k in st.session_state:
-                    del st.session_state[k]
+            # ★ 手入力フォームのstateをリセット（form_keyを変えることで強制リセット）
+            st.session_state.manual_form_key = st.session_state.get("manual_form_key", 0) + 1
             st.rerun()
 
         st.markdown("<br><br><br>", unsafe_allow_html=True)
@@ -310,6 +309,7 @@ def main() -> None:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ★ 起動時から表示される「元請発注書なし」手入力フォーム
+    _mfk = st.session_state.get("manual_form_key", 0)
     with st.expander("📝 元請発注書なし（手入力で登録）", expanded=True):
         st.markdown("""
             <div style="background:#fff7ed;border-left:5px solid #f97316;padding:0.7rem 1rem;border-radius:0.5rem;margin-bottom:1rem;">
@@ -322,18 +322,18 @@ def main() -> None:
         staff_list_manual = fetch_staff_list()
         col_a, col_b = st.columns(2)
         with col_a:
-            manual_client = st.text_input("元請会社名", key="manual_client", placeholder="例：㈱アイ工務店")
-            manual_name = st.text_input("工事名（邸名）", key="manual_name", placeholder="例：田中 様邸 給排水設備工事")
-            manual_address = st.text_input("現場住所", key="manual_address", placeholder="例：愛知県名古屋市...")
+            manual_client = st.text_input("元請会社名", key=f"manual_client_{_mfk}", placeholder="例：㈱アイ工務店")
+            manual_name = st.text_input("工事名（邸名）", key=f"manual_name_{_mfk}", placeholder="例：田中 様邸 給排水設備工事")
+            manual_address = st.text_input("現場住所", key=f"manual_address_{_mfk}", placeholder="例：愛知県名古屋市...")
         with col_b:
-            manual_amount = st.number_input("受注額（税込）", key="manual_amount", min_value=0, step=1000, format="%d")
+            manual_amount = st.number_input("受注額（税込）", key=f"manual_amount_{_mfk}", min_value=0, step=1000, format="%d")
             manual_staff = st.selectbox("送信担当者（必須）", options=[""] + staff_list_manual,
-                format_func=lambda x: "担当者を選択..." if x == "" else x, key="manual_staff")
+                format_func=lambda x: "担当者を選択..." if x == "" else x, key=f"manual_staff_{_mfk}")
             col_date1, col_date2 = st.columns(2)
             with col_date1:
-                manual_start = st.date_input("工期（開始）", key="manual_start", value=None)
+                manual_start = st.date_input("工期（開始）", key=f"manual_start_{_mfk}", value=None)
             with col_date2:
-                manual_end = st.date_input("工期（終了）", key="manual_end", value=None)
+                manual_end = st.date_input("工期（終了）", key=f"manual_end_{_mfk}", value=None)
 
         send_ok = bool(manual_staff and manual_client and manual_name)
         if st.button("📤 元請発注書なしで登録・送信", type="primary",
