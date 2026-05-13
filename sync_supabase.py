@@ -200,6 +200,7 @@ def insert_fine_row(
         "start_date": db_start,
         "end_date": db_end,
         "status": "active",
+        "has_client_order": row.get("has_client_order", True),  # ★ 元請発注書あり/なし
     }
 
     proj_res = supabase.table("projects").insert(project_body).execute()

@@ -160,6 +160,7 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "送信": False,
+        "元請発注書なし": False,      # ★ 手入力時にチェックすると has_client_order=False になる
         "ファイル名": filename,
         "1. 元請名所":              parsed.get("company") or "不明",
         "2. 契約番号(注文/工事)":   parsed.get("id") or "-",
@@ -181,7 +182,7 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
 
 
 EDITOR_COLUMNS = [
-    "送信", "ファイル名", "1. 元請名所",
+    "送信", "元請発注書なし", "ファイル名", "1. 元請名所",
     "2. 契約番号(注文/工事)",
     "2-1. 現場ID/契約枝番号",
     "2-2. 発注枝番",
@@ -374,6 +375,7 @@ def main() -> None:
             num_rows="dynamic",
             column_config={
                 "送信": st.column_config.CheckboxColumn("送信", default=False),
+                "元請発注書なし": st.column_config.CheckboxColumn("📄 元請発注書なし", default=False),
                 "5. 代金(金額)": st.column_config.NumberColumn("5. 代金(金額)", format="¥%d"),
                 "ステータス": st.column_config.SelectboxColumn(
                     "ステータス", options=["未送信", "完了", "エラー"], disabled=True
@@ -440,6 +442,8 @@ def sync_data(edf: pd.DataFrame, supabase: Client, sent_by: str):
                 # ★ sent_by を row に追加して insert_fine_row に渡す
                 row_dict = row.to_dict()
                 row_dict["sent_by"] = sent_by
+                # ★ 元請発注書なしフラグを渡す
+                row_dict["has_client_order"] = not bool(row_dict.get("元請発注書なし", False))
                 insert_fine_row(supabase, row_dict, f18_code)
                 edf.at[idx, "注文No(F18)"] = f18_code
                 edf.at[idx, "ステータス"] = "完了"
