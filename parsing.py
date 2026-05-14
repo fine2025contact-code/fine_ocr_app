@@ -501,7 +501,7 @@ def parse_universal(t: str, tight: str, result: dict, company: str):
         if m_amt:
             amt_val = _num(m_amt.group(1))
             # ★ マイナス金額が既に設定されている場合は上書きしない
-            if 1000 <= amt_val <= 9000000 and result.get("amount", 0) >= 0:
+            if 1000 <= amt_val <= 9000000 and result.get("amount", 0) > 0:
                 result["amount"] = amt_val
 
     lbl_doc = labels.get("doc_type")
