@@ -236,14 +236,8 @@ def _normalize_text(text: str) -> str:
 # 金額抽出
 # =========================
 def extract_amount(t: str, tight: str) -> int:
-    # ★ マイナス金額の判定（住友不動産B表: -\\231,000 形式）
-    sumitomo_minus = re.search(r'発注金額[（(]税込[）)].*?-\\\\([\d,]+)', t)
-    if sumitomo_minus:
-        val = _num(sumitomo_minus.group(1))
-        if val > 0: return -val
-
-    # ★ 発注金額（税込）行のマイナス（住友B表: 3 1 027 -\\210,000 -\\21,000 -\\231,000）
-    sumitomo_line = re.search(r'\d\s+\d\s+\d{3}\s+-\\\\[\d,]+\s+-\\\\[\d,]+\s+-\\\\([\d,]+)', t)
+    # ★ 住友B表マイナス: 「3 1 027 -\210,000 -\21,000 -\231,000」形式
+    sumitomo_line = re.search(r'\d\s+\d\s+\d{3}\s+-\\[\d,]+\s+-\\[\d,]+\s+-\\([\d,]+)', t)
     if sumitomo_line:
         val = _num(sumitomo_line.group(1))
         if val > 0: return -val
@@ -633,7 +627,8 @@ def parse_sumitomo(t: str, tight: str, result: dict):
         if m_b_date:
             result['date'] = _slash_to_fmt(m_b_date.group(1))
 
-    if not result.get('amount') or result['amount'] == 0:
+    # ★ マイナス金額が既に設定されている場合は上書きしない
+    if not result.get('amount') or (result.get('amount', 0) >= 0 and result['amount'] == 0):
         all_amts = [int(a.replace(',', '')) for a in re.findall(r'[\\]([\d,]{3,})', t)]
         valid = [a for a in all_amts if 1000 <= a <= 9_000_000]
         if valid:
