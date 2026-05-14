@@ -236,6 +236,30 @@ def _normalize_text(text: str) -> str:
 # 金額抽出
 # =========================
 def extract_amount(t: str, tight: str) -> int:
+    # ★ マイナス金額の判定（住友不動産B表: -\\231,000 形式）
+    sumitomo_minus = re.search(r'発注金額[（(]税込[）)].*?-\\\\([\d,]+)', t)
+    if sumitomo_minus:
+        val = _num(sumitomo_minus.group(1))
+        if val > 0: return -val
+
+    # ★ 発注金額（税込）行のマイナス（住友B表: 3 1 027 -\\210,000 -\\21,000 -\\231,000）
+    sumitomo_line = re.search(r'\d\s+\d\s+\d{3}\s+-\\\\[\d,]+\s+-\\\\[\d,]+\s+-\\\\([\d,]+)', t)
+    if sumitomo_line:
+        val = _num(sumitomo_line.group(1))
+        if val > 0: return -val
+
+    # ★ アイ工務店のマイナス合計（合計 -15,400）
+    ai_minus = re.search(r'合計\s*-([\d,]+)\s*$', t, re.MULTILINE)
+    if ai_minus:
+        val = _num(ai_minus.group(1))
+        if val > 0: return -val
+
+    # ★ 金額欄のマイナス（¥ -15,400 形式）
+    kin額_minus = re.search(r'金\s*[　\s]*額\s*¥\s*-([\d,]+)', t)
+    if kin额_minus:
+        val = _num(kin额_minus.group(1))
+        if val > 0: return -val
+
     ai_top = re.search(r"合計\s*([0-9,]{4,10})\s*$", t, re.MULTILINE)
     if ai_top:
         val = _num(ai_top.group(1))
@@ -969,7 +993,7 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     if "浄水槽" in t and result["content"] == "注文工事":
         result["content"] = "浄水槽工事"
 
-    # ★ 枚目判定（1/2枚目、2/2枚目など）
+    # ★ 枚目判定（「（ 2 / 2 枚 目 ）」のようなスペースあり形式に対応）
     m_page = re.search(r'[（(]\s*(\d+)\s*/\s*(\d+)\s*枚\s*目\s*[）)]', t)
     if m_page:
         current = m_page.group(1)
@@ -977,7 +1001,7 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
         result["docType"] = f"{result.get('docType', '注文書')} ({current}/{total}枚目)"
     else:
         # 「支払 1/2枚目50% 2/2枚目50%」形式も判定
-        m_shiharai = re.search(r'支\s*払.*?(\d+)/(\d+)枚目', t)
+        m_shiharai = re.search(r'(\d+)/(\d+)枚目', t)
         if m_shiharai:
             total = m_shiharai.group(2)
             result["docType"] = f"{result.get('docType', '注文書')} ({total}枚構成)"

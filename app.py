@@ -444,7 +444,7 @@ def main() -> None:
             column_config={
                 "送信": st.column_config.CheckboxColumn("送信", default=False),
                 "元請発注書なし": st.column_config.CheckboxColumn("📄 元請発注書なし", default=False),
-                "5. 代金(金額)": st.column_config.NumberColumn("5. 代金(金額)", format="¥%d"),
+                "5. 代金(金額)": st.column_config.NumberColumn("5. 代金(金額)", format="¥%d", min_value=-99000000),
                 "注文No(F18)": st.column_config.TextColumn("注文No", disabled=True, help="F番号は振り分け画面で割り当てられます"),
                 "ステータス": st.column_config.SelectboxColumn(
                     "ステータス", options=["未送信", "完了", "エラー"], disabled=True
