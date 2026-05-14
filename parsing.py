@@ -622,7 +622,8 @@ def parse_sumitomo(t: str, tight: str, result: dict):
     if m_block:
         result['client_code2'] = m_block.group(1).replace(' ', '')
         result['client_code3'] = m_block.group(2)
-        result['amount']       = int(m_block.group(3).replace(',', ''))
+        # ★ m_blockのamountはここでは設定しない（extract_amountのマイナス値を優先）
+        # result['amount']     = int(m_block.group(3).replace(',', ''))
         result['date']         = _slash_to_fmt(m_block.group(4))
     else:
         m_b_date = re.search(r'⑧注文請書\n(\d{4}/\d{1,2}/\d{1,2})', t)
@@ -630,7 +631,7 @@ def parse_sumitomo(t: str, tight: str, result: dict):
             result['date'] = _slash_to_fmt(m_b_date.group(1))
 
     # ★ マイナス金額が既に設定されている場合は上書きしない
-    if not result.get('amount') or (result.get('amount', 0) >= 0 and result['amount'] == 0):
+    if not result.get('amount') or result['amount'] == 0:
         all_amts = [int(a.replace(',', '')) for a in re.findall(r'[\\]([\d,]{3,})', t)]
         valid = [a for a in all_amts if 1000 <= a <= 9_000_000]
         if valid:
@@ -934,9 +935,13 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
     result["biz_name"]    = dynamic_extract(config.get("label_biz_name"), tight)
 
     # 専用パーサーで全項目取得する会社は汎用抽出をスキップ
-    if company not in ("㈱グローブホーム", "住友不動産ハウジング㈱"):
+    if company == "㈱グローブホーム":
+        pass  # グローブホームは専用パーサーで処理
+    else:
+        # ★ 住友不動産もextract_amountを呼ぶ（マイナス金額対応）
         result["amount"] = extract_amount(t, tight)
-        result["address"] = extract_address(t)
+        if company != "住友不動産ハウジング㈱":
+            result["address"] = extract_address(t)
 
     id_1p = re.search(r"(1P[0-9]{3,6})", tight)
     if id_1p: result["id"] = id_1p.group(0)
