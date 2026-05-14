@@ -255,9 +255,9 @@ def extract_amount(t: str, tight: str) -> int:
         if val > 0: return -val
 
     # ★ 金額欄のマイナス（¥ -15,400 形式）
-    kin額_minus = re.search(r'金\s*[　\s]*額\s*¥\s*-([\d,]+)', t)
-    if kin额_minus:
-        val = _num(kin额_minus.group(1))
+    kin_minus = re.search(r'金\s*[　\s]*額\s*¥\s*-([\d,]+)', t)
+    if kin_minus:
+        val = _num(kin_minus.group(1))
         if val > 0: return -val
 
     ai_top = re.search(r"合計\s*([0-9,]{4,10})\s*$", t, re.MULTILINE)
