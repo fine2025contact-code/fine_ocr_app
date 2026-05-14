@@ -236,20 +236,22 @@ def _normalize_text(text: str) -> str:
 # 金額抽出
 # =========================
 def extract_amount(t: str, tight: str) -> int:
-    # ★ 住友B表マイナス: 「3 1 027 -\210,000 -\21,000 -\231,000」形式
-    sumitomo_line = re.search(r'\d\s+\d\s+\d{3}\s+-\\[\d,]+\s+-\\[\d,]+\s+-\\([\d,]+)', t)
-    if sumitomo_line:
-        val = _num(sumitomo_line.group(1))
-        if val > 0: return -val
+    # ★ 住友B表マイナス: -\231,000 形式（バックスラッシュ+金額）
+    # 複数のマイナス金額がある場合は最大値（税込合計）を取得
+    sumitomo_minus_all = re.findall(r'-\\([\d,]+)', t)
+    if sumitomo_minus_all:
+        vals = [_num(v) for v in sumitomo_minus_all if _num(v) >= 1000]
+        if vals:
+            return -max(vals)
 
-    # ★ アイ工務店のマイナス合計（合計 -15,400）
-    ai_minus = re.search(r'合計\s*-([\d,]+)\s*$', t, re.MULTILINE)
+    # ★ アイ工務店のマイナス合計（「合計\n- 15,400」や「合計 -15,400」形式）
+    ai_minus = re.search(r'合計[\s\n]*-\s*([\d, ]+)', t)
     if ai_minus:
         val = _num(ai_minus.group(1))
         if val > 0: return -val
 
-    # ★ 金額欄のマイナス（¥ -15,400 形式）
-    kin_minus = re.search(r'金\s*[　\s]*額\s*¥\s*-([\d,]+)', t)
+    # ★ 金額欄のマイナス（「¥ - 15,400」や「¥-15,400」形式）
+    kin_minus = re.search(r'[¥￥]\s*-\s*([\d, ]+)', t)
     if kin_minus:
         val = _num(kin_minus.group(1))
         if val > 0: return -val
