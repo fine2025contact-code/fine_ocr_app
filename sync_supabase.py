@@ -161,11 +161,16 @@ def insert_fine_row(
     client_id = resolve_client_id(moto_name)
 
     # 3. 工事名・現場名
-    raw_site    = row.get("3. 現場名(事業名)") or row.get("3-1. 工事名(邸名)") or fd.get("no3_site_name") or ""
+    # ★ 3-1（邸名・棟番号含む）を優先、なければ3. 現場名を使用
+    raw_koji    = row.get("3-1. 工事名(邸名)") or fd.get("no3_1_kojimei") or ""
+    raw_site    = row.get("3. 現場名(事業名)") or fd.get("no3_site_name") or ""
     raw_content = row.get("6. 工事件名(内容/名称)") or fd.get("no6_content") or "名称未設定"
 
-    if raw_site and raw_site not in raw_content:
-        name = f"{raw_site} {raw_content}".strip()
+    # ★ 3-1に棟番号・号地などが含まれている場合は3-1を優先
+    base_name = raw_koji if raw_koji else raw_site
+
+    if base_name and base_name not in raw_content:
+        name = f"{base_name} {raw_content}".strip()
     else:
         name = str(raw_content)
 
