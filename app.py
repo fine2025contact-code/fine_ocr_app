@@ -134,6 +134,44 @@ def fetch_staff_list() -> list[str]:
         return []
 
 
+# ★ clients テーブルから元請会社リストを取得
+@st.cache_data(ttl=300)
+def fetch_clients_list() -> list[str]:
+    try:
+        supabase = _get_supabase()
+        if not supabase:
+            return []
+        res = supabase.table("clients").select("name").order("name").execute()
+        return [row["name"] for row in (res.data or [])]
+    except Exception as e:
+        st.sidebar.warning(f"元請会社取得エラー: {e}")
+        return []
+
+
+# ★ 都道府県・市区町村マスタ
+AICHI_CITIES = [
+    "名古屋市中区", "名古屋市北区", "名古屋市西区", "名古屋市東区",
+    "名古屋市千種区", "名古屋市昭和区", "名古屋市瑞穂区", "名古屋市熱田区",
+    "名古屋市中村区", "名古屋市中川区", "名古屋市港区", "名古屋市南区",
+    "名古屋市守山区", "名古屋市緑区", "名古屋市名東区", "名古屋市天白区",
+    "一宮市", "春日井市", "豊田市", "岡崎市", "豊橋市", "安城市",
+    "稲沢市", "津島市", "清須市", "東海市", "大府市", "知多市",
+    "半田市", "常滑市", "江南市", "小牧市", "犬山市", "瀬戸市",
+    "日進市", "長久手市", "みよし市", "あま市", "尾張旭市",
+    "北名古屋市", "愛西市", "弥富市", "蒲郡市", "西尾市", "碧南市",
+    "刈谷市", "知立市", "高浜市", "豊明市", "東郷町", "大治町",
+    "蟹江町", "飛島村", "阿久比町", "東浦町", "武豊町", "豊山町",
+]
+
+MIE_CITIES = [
+    "津市", "四日市市", "伊勢市", "松阪市", "桑名市", "鈴鹿市",
+    "名張市", "尾鷲市", "亀山市", "鳥羽市", "熊野市", "いなべ市",
+    "志摩市", "伊賀市", "木曽岬町", "東員町", "菰野町", "朝日町",
+    "川越町", "多気町", "明和町", "大台町", "玉城町", "度会町",
+    "大紀町", "南伊勢町", "紀北町", "御浜町", "紀宝町",
+]
+
+
 def extract_pdf_text_local(file_bytes: bytes, filename: str) -> str:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     full_text_list: list[str] = []
@@ -325,11 +363,68 @@ def main() -> None:
         """, unsafe_allow_html=True)
 
         staff_list_manual = fetch_staff_list()
+        clients_list_manual = fetch_clients_list()
+
         col_a, col_b = st.columns(2)
         with col_a:
-            manual_client = st.text_input("元請会社名", key=f"manual_client_{_mfk}", placeholder="例：㈱アイ工務店")
+            # ── 元請会社名（Supabaseプルダウン）
+            client_options = [""] + clients_list_manual
+            manual_client = st.selectbox(
+                "元請会社名 ＊",
+                options=client_options,
+                format_func=lambda x: "元請会社を選択してください..." if x == "" else x,
+                key=f"manual_client_{_mfk}"
+            )
+
+            # ── 工事名
             manual_name = st.text_input("工事名（邸名）", key=f"manual_name_{_mfk}", placeholder="例：田中 様邸 給排水設備工事")
-            manual_address = st.text_input("現場住所", key=f"manual_address_{_mfk}", placeholder="例：愛知県名古屋市...")
+
+            # ── 現場住所（都道府県 → 市区町村の2段階）
+            pref_options = ["", "愛知県", "三重県", "その他（手入力）"]
+            manual_pref = st.selectbox(
+                "都道府県",
+                options=pref_options,
+                format_func=lambda x: "都道府県を選択..." if x == "" else x,
+                key=f"manual_pref_{_mfk}"
+            )
+
+            if manual_pref == "愛知県":
+                manual_city = st.selectbox(
+                    "市区町村",
+                    options=[""] + AICHI_CITIES,
+                    format_func=lambda x: "市区町村を選択..." if x == "" else x,
+                    key=f"manual_city_{_mfk}"
+                )
+                manual_address_detail = st.text_input(
+                    "番地・建物名（任意）",
+                    key=f"manual_addr_detail_{_mfk}",
+                    placeholder="例：港区津金2丁目11番28号"
+                )
+                manual_address = f"愛知県{manual_city}{manual_address_detail}".strip() if manual_city else ""
+
+            elif manual_pref == "三重県":
+                manual_city = st.selectbox(
+                    "市区町村",
+                    options=[""] + MIE_CITIES,
+                    format_func=lambda x: "市区町村を選択..." if x == "" else x,
+                    key=f"manual_city_mie_{_mfk}"
+                )
+                manual_address_detail = st.text_input(
+                    "番地・建物名（任意）",
+                    key=f"manual_addr_detail_mie_{_mfk}",
+                    placeholder="例：津市羽所町700番地"
+                )
+                manual_address = f"三重県{manual_city}{manual_address_detail}".strip() if manual_city else ""
+
+            elif manual_pref == "その他（手入力）":
+                manual_address = st.text_input(
+                    "現場住所（手入力）",
+                    key=f"manual_address_other_{_mfk}",
+                    placeholder="例：岐阜県岐阜市○○町..."
+                )
+            else:
+                manual_address = ""
+
         with col_b:
             manual_amount = st.number_input("受注額（税込）", key=f"manual_amount_{_mfk}", min_value=0, step=1000, format="%d")
             manual_staff = st.selectbox("送信担当者（必須）", options=[""] + staff_list_manual,
