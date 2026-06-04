@@ -32,55 +32,9 @@ from supabase import Client
 from parsing import resolve_client_id
 
 
-def _parse_f18_counter(last_no: str | None) -> int:
-    if not last_no:
-        return 0
-    digits = re.sub(r"[^0-9]", "", str(last_no))
-    if not digits:
-        return 0
-    return int(digits) % 10000
+# ★ F18関連の採番関数は削除
+# 発注書（F番号）の採番・作成はすべて振り分け画面（OrderDistributor）で行う
 
-
-def get_max_f18_counter(supabase: Client) -> int:
-    """DB上の F18* の最大番号に対応するカウンタ（互換性のため残す）"""
-    try:
-        res = (
-            supabase.table("orders")
-            .select("order_custom_no")
-            .like("order_custom_no", "F18%")
-            .order("order_custom_no", desc=True)
-            .limit(1)
-            .execute()
-        )
-        data = getattr(res, "data", None) or []
-        if isinstance(data, list) and len(data) > 0:
-            return _parse_f18_counter(data[0].get("order_custom_no"))
-    except Exception:
-        pass
-    return 0
-
-
-def f18_exists(supabase: Client, f18: str) -> bool:
-    res = (
-        supabase.table("orders")
-        .select("id")
-        .eq("order_custom_no", f18)
-        .limit(1)
-        .execute()
-    )
-    data = getattr(res, "data", None) or []
-    return len(data) > 0
-
-
-def next_unique_f18(supabase: Client, start_counter: int) -> tuple[str, int]:
-    """互換性のため残す（OCRアプリ側では使用しない）"""
-    c = start_counter
-    while True:
-        c += 1
-        suffix = ("0000" + str(c))[-4:]
-        f18 = "F18" + suffix
-        if not f18_exists(supabase, f18):
-            return f18, c
 
 
 def _to_float_amount(v: Any) -> float:

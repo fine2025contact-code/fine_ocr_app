@@ -21,7 +21,7 @@ import numpy as np
 import easyocr
 from supabase import Client, create_client
 
-from parsing import parse_ocr_text
+from parsing import parse_ocr_text, set_supabase_client
 from sync_supabase import insert_fine_row
 
 st.set_page_config(
@@ -103,13 +103,18 @@ def load_ocr():
 ocr_reader = load_ocr()
 
 
+@st.cache_resource
 def _get_supabase() -> Client | None:
+    """Supabaseクライアントをシングルトンで返す（st.secrets からのみ接続）"""
     try:
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
         from supabase.lib.client_options import ClientOptions
         options = ClientOptions(postgrest_client_timeout=10, storage_client_timeout=10)
-        return create_client(url, key, options=options)
+        client = create_client(url, key, options=options)
+        # parsing.py にクライアントを注入（キーのベタ書きを排除）
+        set_supabase_client(client)
+        return client
     except Exception as e:
         st.sidebar.error(f"接続エラー詳細: {e}")
         return None

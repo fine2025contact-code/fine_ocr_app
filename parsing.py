@@ -17,25 +17,26 @@ import re
 import datetime
 import os
 from typing import Any, Final
-from supabase import create_client, Client
+from supabase import Client
 
 # =========================
 # Supabase 接続設定
+# ※ 接続はapp.pyのst.secretsで行い、parsing.pyには持ち込まない
 # =========================
-SUPABASE_URL = "https://elmvkjkpdyebbgjsarwq.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVsbXZramtwZHllYmJnanNhcndxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzMjczMzQsImV4cCI6MjA4MzkwMzMzNH0.4DbhZZBRFavbl44Ge07dwhvty4Q2WaDNLJw-GwAOYkY"
 
-try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-except Exception as e:
-    print(f"Supabase接続エラー: {e}")
-    supabase = None
+# モジュールレベルのSupabaseクライアント（app.pyから set_supabase_client() で注入）
+_supabase_client: Client | None = None
+
+def set_supabase_client(client: Client) -> None:
+    """app.py から呼び出してクライアントを注入する"""
+    global _supabase_client
+    _supabase_client = client
 
 def get_client_config(company_name: str) -> dict:
-    if not supabase:
+    if not _supabase_client:
         return {}
     try:
-        response = supabase.table("client_configs").select("*").ilike("name", f"%{company_name}%").execute()
+        response = _supabase_client.table("client_configs").select("*").ilike("name", f"%{company_name}%").execute()
         if response.data and len(response.data) > 0:
             return response.data
     except Exception as e:
