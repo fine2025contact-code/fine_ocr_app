@@ -252,10 +252,12 @@ def extract_amount(t: str, tight: str) -> int:
         if val > 0: return -val
 
     # ★ 金額欄のマイナス（「¥ - 15,400」や「¥-15,400」形式）
-    kin_minus = re.search(r'[¥￥]\s*-\s*([\d, ]+)', t)
-    if kin_minus:
-        val = _num(kin_minus.group(1))
-        if val > 0: return -val
+    # ただし出精値引・調整費など差引き行は除外（合計金額と別行なので誤検知を防ぐ）
+    if not re.search(r'(出精値引|調整費|OTTF|差引)', t):
+        kin_minus = re.search(r'[¥￥]\s*-\s*([\d, ]+)', t)
+        if kin_minus:
+            val = _num(kin_minus.group(1))
+            if val > 0: return -val
 
     ai_top = re.search(r"合計\s*([0-9,]{4,10})\s*$", t, re.MULTILINE)
     if ai_top:
@@ -548,7 +550,7 @@ def parse_globe(t: str, tight: str, result: dict):
 
 
 def parse_sumitomo_vertical(t: str, result: dict):
-    m = re.search(r'工事番号\n([0-9A-Z]{5})', t)
+    m = re.search(r'工事番号\n([0-9A-Z]{5,6})', t)
     if m: result['id'] = m.group(1)
 
     m = re.search(r'契約枝番\s*(\d{2})\s*発注枝番\s*(\d{2,3})', t)
@@ -561,35 +563,89 @@ def parse_sumitomo_vertical(t: str, result: dict):
             result['client_code3'] = m.group(1)
             result['client_code2'] = m.group(2)
 
-    m = re.search(r'工事名称\s+(.+?)(?:\n|$)', t)
-    if not m:
-        m = re.search(r'工事名称(.+?)\n現場住所', t)
-    if m: result['site_name'] = m.group(1).strip()
+    # ★ 工事名称（複数パターンで柔軟に取得）
+    site_found = False
+    for pat in [
+        r'工事名称\s+([^\n\t]{2,40})',       # 同行またはスペース後
+        r'工事名称\n([^\n]{2,40})',           # 次の行
+        r'工事名称[ \t]*\n[ \t]*([^\n]{2,40})',  # 改行＋空白後
+    ]:
+        m = re.search(pat, t)
+        if m:
+            name = m.group(1).strip()
+            if name and '現場住所' not in name and len(name) >= 2:
+                result['site_name'] = name
+                result['koji_name'] = name
+                site_found = True
+                break
 
-    m = re.search(r'現場住所\s+(.+?)(?:\nBtoB|\nFAX|\n【|\n$)', t)
-    if not m:
-        m = re.search(r'現場住所(.+?)(?:\nBtoB|\nFAX|\n【)', t)
-    if m: result['address'] = m.group(1).strip()
+    # ★ 現場住所（複数パターンで柔軟に取得）
+    for pat in [
+        r'現場住所\s+([^\n]{5,60})',
+        r'現場住所\n([^\n]{5,60})',
+        r'現場住所[ \t]*\n[ \t]*([^\n]{5,60})',
+    ]:
+        m = re.search(pat, t)
+        if m:
+            addr = m.group(1).strip()
+            # FINE社の自社住所（津金）は除外
+            if addr and '津金' not in addr and len(addr) >= 5:
+                result['address'] = addr
+                break
 
-    m = re.search(r'合\s*計\s*金\s*額\n([\d,]+)', t)
-    if m: result['amount'] = int(m.group(1).replace(',', ''))
-
-    m = re.search(r'\d+\.([^\n]+給排水[^\n]*)\n\d{3}\n', t)
+    # ★ 金額抽出：出精値引（調整費）対応
+    # 優先順位: 税抜金額 → 合計金額 → 工事計
+    amt_found = False
+    # ① 税抜金額（最優先：調整後の正味金額）
+    m = re.search(r'税\s*抜\s*金\s*額[\s\n]+([\d,]+)', t)
     if m:
-        result['content'] = m.group(1).strip()
-    else:
-        m = re.search(r'\d+\.([^\n]+)\n\d{3}\n(?:地域加算|\d+\.|-)', t)
+        val = int(m.group(1).replace(',', ''))
+        if val > 0:
+            result['amount'] = val
+            amt_found = True
+    # ② 合計金額（税込）→ 税抜に戻す
+    if not amt_found:
+        m = re.search(r'合\s*計\s*金\s*額[\s\n]+([\d,]+)', t)
+        if m:
+            val = int(m.group(1).replace(',', ''))
+            if val > 0:
+                result['amount'] = round(val / 1.1)
+                amt_found = True
+    # ③ 工事計（中間合計）
+    if not amt_found:
+        m = re.search(r'工事計[^\d]*([\d,]+)', t)
+        if m:
+            val = int(m.group(1).replace(',', ''))
+            if val > 0:
+                result['amount'] = val
+
+    # ★ 工事内容：出精値引・調整費を除いた最初の工事名称を取得
+    m = re.search(r'\d+[．.]\s*([^\n]+?(?:工事|設備)[^\n]*?)\n', t)
+    if m:
+        content_raw = m.group(1).strip()
+        # 出精値引・調整費は除外
+        if not any(ng in content_raw for ng in ['出精', '値引', '調整費', 'OTTF']):
+            result['content'] = content_raw
+    if not result.get('content') or result['content'] == '注文工事':
+        m = re.search(r'\d+\.([^\n]+給排水[^\n]*)\n', t)
         if m: result['content'] = m.group(1).strip()
 
     m = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', t)
     if m: result['date'] = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
 
-    m = re.search(r'(\d{4}/\d{2}/\d{2})～(\d{4}/\d{2}/\d{2})', t)
+    # ★ 工期（YYYY/MM/DD形式）
+    m = re.search(r'(\d{4}/\d{2}/\d{2})\s*[～~]\s*(\d{4}/\d{2}/\d{2})', t)
     if m:
         result['startDate'] = m.group(1).replace('/', '-')
         result['endDate']   = m.group(2).replace('/', '-')
 
-    result['docType'] = '注文書'
+    # ★ B表・追加注文書の判定
+    if '出精値引' in t or 'OTTF' in t or '調整費' in t:
+        result['docType'] = '注文書（調整含む）'
+    elif 'B 表' in t or 'B表' in t:
+        result['docType'] = 'B表（追加注文書）'
+    else:
+        result['docType'] = '注文書'
 
 
 def parse_sumitomo(t: str, tight: str, result: dict):
