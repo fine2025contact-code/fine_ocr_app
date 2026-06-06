@@ -602,22 +602,22 @@ def parse_sumitomo_vertical(t: str, result: dict):
                 break
 
     # ★ 金額抽出：出精値引（調整費）対応
-    # 優先順位: 税抜金額 → 合計金額 → 工事計
+    # 優先順位: 合計金額（税込）→ 税抜金額 → 工事計
     amt_found = False
-    # ① 税抜金額（最優先：調整後の正味金額）
-    m = re.search(r'税\s*抜\s*金\s*額[\s\n]+([\d,]+)', t)
+    # ① 合計金額（税込）を最優先
+    m = re.search(r'合\s*計\s*金\s*額[\s\n]+([\d,]+)', t)
     if m:
         val = int(m.group(1).replace(',', ''))
-        if val >= 1000:   # OCR誤読で1桁・2桁になった場合は無視
+        if val >= 1000:
             result['amount'] = val
             amt_found = True
-    # ② 合計金額（税込）→ 税抜に戻す
+    # ② 税抜金額（合計が読めない場合）
     if not amt_found:
-        m = re.search(r'合\s*計\s*金\s*額[\s\n]+([\d,]+)', t)
+        m = re.search(r'税\s*抜\s*金\s*額[\s\n]+([\d,]+)', t)
         if m:
             val = int(m.group(1).replace(',', ''))
             if val >= 1000:
-                result['amount'] = round(val / 1.1)
+                result['amount'] = val
                 amt_found = True
     # ③ 工事計（中間合計）
     if not amt_found:
