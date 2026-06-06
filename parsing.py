@@ -213,6 +213,9 @@ def _normalize_text(text: str) -> str:
         "工圭名称": "工事名称", "工主名称": "工事名称", "工芋名称": "工事名称",
         "工圭番号": "工事番号", "工主番号": "工事番号",
         "現場住暫": "現場住所", "現場仕所": "現場住所", "現場往所": "現場住所",
+        "症外": "屋外", "显外": "屋外", "星外": "屋外", "屋タト": "屋外",
+        "給非水": "給排水", "給排ヌ": "給排水", "給#水": "給排水",
+        "設輔": "設備", "設柄": "設備", "没備": "設備",
         "新生避": "新生建設", "新生建設妹": "新生建設", "新生建設歌": "新生建設",
         "工坐": "工事", "工ず": "工事", "工壬": "工事", "工圭": "工事",
         "桑具": "桑員", "桑貝": "桑員",
@@ -605,7 +608,7 @@ def parse_sumitomo_vertical(t: str, result: dict):
     m = re.search(r'税\s*抜\s*金\s*額[\s\n]+([\d,]+)', t)
     if m:
         val = int(m.group(1).replace(',', ''))
-        if val > 0:
+        if val >= 1000:   # OCR誤読で1桁・2桁になった場合は無視
             result['amount'] = val
             amt_found = True
     # ② 合計金額（税込）→ 税抜に戻す
@@ -613,7 +616,7 @@ def parse_sumitomo_vertical(t: str, result: dict):
         m = re.search(r'合\s*計\s*金\s*額[\s\n]+([\d,]+)', t)
         if m:
             val = int(m.group(1).replace(',', ''))
-            if val > 0:
+            if val >= 1000:
                 result['amount'] = round(val / 1.1)
                 amt_found = True
     # ③ 工事計（中間合計）
@@ -621,7 +624,7 @@ def parse_sumitomo_vertical(t: str, result: dict):
         m = re.search(r'工事計[^\d]*([\d,]+)', t)
         if m:
             val = int(m.group(1).replace(',', ''))
-            if val > 0:
+            if val >= 1000:
                 result['amount'] = val
 
     # ★ 工事内容：出精値引・調整費を除いた最初の工事名称を取得
