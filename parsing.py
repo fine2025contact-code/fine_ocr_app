@@ -211,9 +211,11 @@ def _normalize_text(text: str) -> str:
         "現場iD": "現場ID", "上.件名": "工事件名", "西工場所": "施工場所", "2078-166": "2078-16",
         "工吏希号": "工事番号", "工雲名称": "工事名称", "注文番亨": "注文番号",
         "工圭名称": "工事名称", "工主名称": "工事名称", "工芋名称": "工事名称",
+        "工華名孤": "工事名称", "工孤": "工事名称", "工華名称": "工事名称",
         "工圭番号": "工事番号", "工主番号": "工事番号",
         "現場住暫": "現場住所", "現場仕所": "現場住所", "現場往所": "現場住所",
         "症外": "屋外", "显外": "屋外", "星外": "屋外", "屋タト": "屋外",
+        "症内": "屋内", "显内": "屋内", "星内": "屋内",
         "給非水": "給排水", "給排ヌ": "給排水", "給#水": "給排水",
         "設輔": "設備", "設柄": "設備", "没備": "設備",
         "新生避": "新生建設", "新生建設妹": "新生建設", "新生建設歌": "新生建設",
@@ -569,34 +571,34 @@ def parse_sumitomo_vertical(t: str, result: dict):
             result['client_code3'] = m.group(1)
             result['client_code2'] = m.group(2)
 
-    # ★ 工事名称（スペースなし・アンダーバー・OCR誤読に対応）
+    # ★ 工事名称（1行連結・スペースなし・アンダーバーすべてに対応）
+    def _clean_name(s):
+        s = re.sub(r'[_＿]+', ' ', s).strip()
+        return re.sub(r'\s{2,}', ' ', s)
+
     for pat in [
-        r'工事名称\s*([^\n\t]{2,40})',        # スペース0個以上（直後に名前が来るケース）
-        r'工事名称\n([^\n]{2,40})',           # 次の行
-        r'工事名称[ \t]*\n[ \t]*([^\n]{2,40})',
+        r'工事名称\s*(.+?)(?=現場住所)',          # 工事名称XXX現場住所 の形（1行連結）
+        r'工事名称\s*([^\n\t]{2,30}?)(?=\s*$|\n)', # 行末まで（改行で終わる）
+        r'工事名称\n([^\n]{2,30})',               # 次行にある
+        r'工事名称(.+?)\n現場住所',               # 旧パターン（改行をまたぐ）
     ]:
-        m = re.search(pat, t)
+        m = re.search(pat, t, re.DOTALL if 'DOTALL' not in pat else 0)
         if m:
-            name = m.group(1).strip()
-            # アンダーバー・全角アンダーバーをスペースに変換
-            name = re.sub(r'[_＿]+', ' ', name).strip()
-            name = re.sub(r'\s{2,}', ' ', name)
+            name = _clean_name(m.group(1))
             if name and '現場住所' not in name and len(name) >= 2:
                 result['site_name'] = name
                 result['koji_name'] = name
                 break
 
-    # ★ 現場住所（スペースなし・複数パターン対応）
+    # ★ 現場住所（1行連結・複数パターン対応）
     for pat in [
-        r'現場住所\s*([^\n]{5,60})',
-        r'現場住所\n([^\n]{5,60})',
-        r'現場住所[ \t]*\n[ \t]*([^\n]{5,60})',
+        r'現場住所\s*(.+?)(?=\n工\s*事\s*名\s*称|\n建面|\n工\s*事\s*名\s*称|$)',  # 次の見出しまで
+        r'現場住所\s*([^\n]{5,80})',               # 同行（長めに）
+        r'現場住所\n([^\n]{5,80})',                # 次行
     ]:
-        m = re.search(pat, t)
+        m = re.search(pat, t, re.DOTALL)
         if m:
-            addr = m.group(1).strip()
-            addr = re.sub(r'\s+', '', addr)   # 住所内のスペース除去
-            # FINE社の自社住所（津金）は除外
+            addr = re.sub(r'\s+', '', m.group(1).strip())
             if addr and '津金' not in addr and len(addr) >= 5:
                 result['address'] = addr
                 break
@@ -604,19 +606,19 @@ def parse_sumitomo_vertical(t: str, result: dict):
     # ★ 金額抽出：出精値引（調整費）対応
     # 優先順位: 合計金額（税込）→ 税抜金額 → 工事計
     amt_found = False
-    # ① 合計金額（税込）を最優先
+    # ① 合計金額（税込）を最優先 ― OCR誤読で桁が欠ける場合は100,000未満を除外
     m = re.search(r'合\s*計\s*金\s*額[\s\n]+([\d,]+)', t)
     if m:
         val = int(m.group(1).replace(',', ''))
-        if val >= 1000:
+        if val >= 100000:
             result['amount'] = val
             amt_found = True
-    # ② 税抜金額（合計が読めない場合）
+    # ② 税抜金額（合計が読めない場合）― 同様に100,000未満は無視
     if not amt_found:
         m = re.search(r'税\s*抜\s*金\s*額[\s\n]+([\d,]+)', t)
         if m:
             val = int(m.group(1).replace(',', ''))
-            if val >= 1000:
+            if val >= 100000:
                 result['amount'] = val
                 amt_found = True
     # ③ 工事計（中間合計）
@@ -624,7 +626,7 @@ def parse_sumitomo_vertical(t: str, result: dict):
         m = re.search(r'工事計[^\d]*([\d,]+)', t)
         if m:
             val = int(m.group(1).replace(',', ''))
-            if val >= 1000:
+            if val >= 100000:
                 result['amount'] = val
 
     # ★ 工事内容：出精値引・調整費を除いた最初の工事名称を取得
