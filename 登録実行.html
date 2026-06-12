@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>FINE OCR - 新規会社OCR設定登録</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  body { font-family: 'Segoe UI', sans-serif; max-width: 700px; margin: 40px auto; background: #f8f9fa; padding: 20px; }
+  h1 { color: #1e293b; font-size: 1.5rem; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; }
+  .card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 12px 0; }
+  .log { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px; margin-top: 20px; font-family: monospace; font-size: 0.85rem; line-height: 2; min-height: 80px; }
+  .ok   { color: #4ade80; }
+  .skip { color: #fbbf24; }
+  .err  { color: #f87171; }
+  .info { color: #93c5fd; }
+  button { background: #3b82f6; color: white; border: none; padding: 12px 28px; border-radius: 8px; font-size: 1rem; cursor: pointer; margin-top: 16px; }
+  button:disabled { background: #94a3b8; cursor: not-allowed; }
+  button:hover:not(:disabled) { background: #2563eb; }
+</style>
+</head>
+<body>
+<h1>🏢 FINE OCR 新規会社OCR設定登録</h1>
+
+<div class="card">
+  <strong>登録対象会社</strong>
+  <ul>
+    <li>アーキテックス㈱（アーキテックス株式会社 新築事業部）</li>
+    <li>阿部建設㈱（阿部建設株式会社）</li>
+  </ul>
+  <strong>登録内容：</strong> client_configs テーブルへのOCR読取り箇所設定
+</div>
+
+<button id="btn" onclick="runSetup()">▶ OCR設定を登録する</button>
+<div class="log" id="log"><span class="info">ボタンを押して登録を開始してください。</span></div>
+
+<script>
+const SUPABASE_URL = "https://elmvkjkpdyebbgjsarwq.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVsbXZramtwZHllYmJnanNhcndxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzMjczMzQsImV4cCI6MjA4MzkwMzMzNH0.4DbhZZBRFavbl44Ge07dwhvty4Q2WaDNLJw-GwAOYkY";
+
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+const logEl = document.getElementById("log");
+
+function log(msg, cls = "info") {
+  logEl.innerHTML += `<div class="${cls}">${msg}</div>`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ============================================================
+// client_configs テーブルに登録するOCR設定
+// ※ 発注書PDFのラベル名に合わせて設定
+// ============================================================
+const CONFIGS = [
+  {
+    // アーキテックス株式会社 新築事業部
+    name:              "アーキテックス㈱",
+    label_no1:         "発注管理ID",    // 例: 381936-01V28J-5427673
+    label_site_name:   "案件名",        // 例: KH 平井 善大様邸 新築工事
+    label_amount:      "発注金額",      // 例: 211,200円
+    label_date:        "出力日",        // 例: 2026年04月07日
+    label_kouki:       "工程終了日",    // 例: 2026年08月31日
+    // 動的抽出フィールド（追加情報用）
+    label_contract_no: "発注管理ID",
+    label_kouji_code:  null,
+    label_order_no:    null,
+    label_project_no:  null,
+    label_biz_name:    "案件名",
+  },
+  {
+    // 阿部建設株式会社
+    name:              "阿部建設㈱",
+    label_no1:         "工事コード",    // 例: 2460001
+    label_site_name:   "工事名",        // 例: 川合 徹様・川合幸代様邸 新築工事
+    label_address:     "工事場所",      // 例: 愛知県名古屋市守山区...
+    label_amount:      "税込金額",      // 例: 1,012,000
+    label_date:        "作成日",        // 例: 令和7年12月02日
+    label_kouki:       "工期",          // 例: 令和7年09月22日 ～ 令和8年03月22日
+    // 動的抽出フィールド
+    label_contract_no: null,
+    label_order_no:    "発注No",        // 例: 23
+    label_project_no:  null,
+    label_kouji_code:  "工事コード",
+    label_biz_name:    "工事名",
+  },
+];
+
+async function runSetup() {
+  document.getElementById("btn").disabled = true;
+  logEl.innerHTML = "";
+  log("=== client_configs テーブルへのOCR設定登録 ===");
+
+  for (const cfg of CONFIGS) {
+    log(`<br>▷ ${cfg.name} を処理中...`);
+
+    // 既存チェック
+    const { data: existing, error: fetchErr } = await db
+      .from("client_configs")
+      .select("id, name")
+      .ilike("name", `%${cfg.name}%`);
+
+    if (fetchErr) {
+      log(`  [エラー] 確認失敗: ${fetchErr.message}`, "err");
+      continue;
+    }
+
+    if (existing && existing.length > 0) {
+      log(`  [スキップ] 既に登録済みです (id: ${existing[0].id})`, "skip");
+      // 上書き更新する場合はここでupdateを実行
+    } else {
+      const { data, error } = await db.from("client_configs").insert(cfg).select();
+      if (error) {
+        log(`  [エラー] 登録失敗: ${error.message}`, "err");
+        // カラムが存在しない場合は最小フィールドで再試行
+        if (error.message.includes("column")) {
+          log(`  → 最小フィールドで再試行します...`, "info");
+          const minimal = { name: cfg.name, label_no1: cfg.label_no1 };
+          const { error: err2 } = await db.from("client_configs").insert(minimal);
+          if (err2) log(`  [エラー] 再試行も失敗: ${err2.message}`, "err");
+          else log(`  [完了] 最小設定で登録しました`, "ok");
+        }
+      } else {
+        log(`  [完了] OCR設定を登録しました (id: ${data[0]?.id})`, "ok");
+        // 登録した内容を表示
+        const labels = Object.entries(cfg)
+          .filter(([k, v]) => k.startsWith("label_") && v)
+          .map(([k, v]) => `${k}: "${v}"`)
+          .join(", ");
+        log(`  設定内容: ${labels}`, "info");
+      }
+    }
+  }
+
+  log("<br>✅ 処理完了！", "ok");
+  log("OCR appを再起動すると設定が反映されます。", "info");
+  document.getElementById("btn").disabled = false;
+}
+</script>
+</body>
+</html>

@@ -38,7 +38,7 @@ def get_client_config(company_name: str) -> dict:
     try:
         response = _supabase_client.table("client_configs").select("*").ilike("name", f"%{company_name}%").execute()
         if response.data and len(response.data) > 0:
-            return response.data
+            return response.data[0]  # 最初の行をdictで返す
     except Exception as e:
         print(f"設定取得エラー ({company_name}): {e}")
     return {}
@@ -66,7 +66,7 @@ CLIENT_ID_MAP: Final[dict[str, str]] = {
     "㈱グローブホーム":       "b7ad0dd3-b170-41e5-8c5e-cd3a3cdf1670",
     "阿部建設㈱":             "0cb5c980-9096-4c52-9dd7-7f24bc6b9a03",
     "住友不動産ハウジング㈱": "7ba58ec1-6a68-463e-bcd9-1ebeb63c85fb",
-    "アーキテックス㈱":       "9336c048-c375-4094-8c6b-f6b95fd7a56c",
+    "アーキテックス㈱":       "df79bbea-dbfc-4b62-952e-ca7df1a9d765",
     "ファースト住建㈱":       "4009a91d-61cf-4f3f-bd2f-4937b376f68d",
     "㈱アイ工務店":           "14db753b-4608-44a1-8fb3-15a2cd770d86",
     "新生建設㈱":             "00350a82-b133-44a4-bc8e-d96344389b76",
