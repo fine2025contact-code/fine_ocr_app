@@ -811,17 +811,27 @@ def parse_architex(t: str, tight: str, result: dict):
     # ★ 住所：アーキテックス発注書に現場住所フィールドなし → 本社住所を誤検知しないよう "-" に固定
     result["address"] = "-"
 
-    # ★ 工程終了日 → endDate（開始日の記載がない場合は終了日で代用）
-    m_end = re.search(r"工程終了日[：:]?\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", t)
-    if m_end:
-        result["endDate"] = _fmt(m_end.group(1), m_end.group(2), m_end.group(3))
-        if not result.get("startDate"):
-            result["startDate"] = result["endDate"]
-
-    # ★ 出力日 → 発注日
-    m_date = re.search(r"出力日[：:]?\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", t)
-    if m_date:
-        result["date"] = _fmt(m_date.group(1), m_date.group(2), m_date.group(3))
+    # ★ 工程終了日 → endDate、出力日 → date
+    # EasyOCRではラベルと値が別行に分離するため位置ベースで取得する
+    # 構造: [工程終了日の値] → 案件名： → [出力日の値] → 備考 → 発注日：
+    idx_anken = t.find("案件名：")
+    if idx_anken < 0:
+        idx_anken = t.find("案件名:")
+    if idx_anken >= 0:
+        before_anken = t[:idx_anken]
+        after_anken  = t[idx_anken:]
+        # 工程終了日: 案件名より前の最後の日付
+        dates_before = re.findall(r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", before_anken)
+        if dates_before:
+            y, m, d = dates_before[-1]
+            result["endDate"] = _fmt(y, m, d)
+            if not result.get("startDate"):
+                result["startDate"] = result["endDate"]
+        # 出力日: 案件名より後の最初の日付
+        dates_after = re.findall(r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", after_anken)
+        if dates_after:
+            y, m, d = dates_after[0]
+            result["date"] = _fmt(y, m, d)
 
 
 def parse_abe(t: str, tight: str, result: dict):
