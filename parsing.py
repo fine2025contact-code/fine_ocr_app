@@ -778,6 +778,56 @@ def parse_first(t: str, tight: str, result: dict):
         result["address"] = "-"
 
 
+def parse_architex(t: str, tight: str, result: dict):
+    """アーキテックス株式会社 新築事業部 専用パーサー"""
+
+    # ★ 発注管理ID: 6桁-英数5〜7文字(-数字5〜8桁)? の形式
+    # 例: 381936-01V28J-5427673、346766-ETAE4X
+    # ※ PDFの構造上、値がラベル（発注管理ID：）より前に出現する
+    m_id = re.search(r"(\d{6}-[A-Z0-9]{4,7}(?:-\d{5,8})?)", tight)
+    if m_id:
+        result["id"] = m_id.group(1)
+
+    # ★ 発注金額（税込合計） = 小計 + 消費税額
+    # 「発注金額」ラベルが値の後に来るため、小計＋税で計算する
+    m_kei = re.search(r"小\s*計[^\d]*([\d,]+)", t)
+    m_tax = re.search(r"消費税[額]?[^\d]*([\d,]+)", t)
+    if m_kei and m_tax:
+        kei = _num(m_kei.group(1))
+        tax = _num(m_tax.group(1))
+        if 5000 <= kei <= 9_000_000 and 0 < tax <= kei:
+            result["amount"] = kei + tax
+    # フォールバック: 全金額の最大値
+    if not result.get("amount") or result["amount"] <= 0:
+        all_amts = [_num(a) for a in re.findall(r"([\d,]{4,10})円", t)]
+        valid = [v for v in all_amts if 10_000 <= v <= 9_000_000]
+        if valid:
+            result["amount"] = max(valid)
+
+    # ★ 工事内容（案件名の直下の行 = 工種名、ラベルなし）
+    # 例: 案件名：KH 平井 善大様邸 新築工事\n屋内給排水工事
+    m_content = re.search(r"案件名[：:][^\n]*\n\s*([^\n]{3,40})", t)
+    if m_content:
+        content = m_content.group(1).strip()
+        if "工事" in content:
+            result["content"] = content
+
+    # ★ 住所：アーキテックス発注書に現場住所フィールドなし → 本社住所を誤検知しないよう "-" に固定
+    result["address"] = "-"
+
+    # ★ 工程終了日 → endDate（開始日の記載がない場合は終了日で代用）
+    m_end = re.search(r"工程終了日[：:]?\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", t)
+    if m_end:
+        result["endDate"] = _fmt(m_end.group(1), m_end.group(2), m_end.group(3))
+        if not result.get("startDate"):
+            result["startDate"] = result["endDate"]
+
+    # ★ 出力日 → 発注日
+    m_date = re.search(r"出力日[：:]?\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", t)
+    if m_date:
+        result["date"] = _fmt(m_date.group(1), m_date.group(2), m_date.group(3))
+
+
 def parse_abe(t: str, tight: str, result: dict):
     tight_fixed = tight.replace("o", "0").replace("O", "0").replace("D", "0").replace("L", "1")
     config = result.get("config", {})
@@ -1036,12 +1086,14 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
         parse_ai(t, tight, result)
     elif company in ("㈱宮崎工務店", "㈱宮崎", "新生建設㈱"):
         parse_miyazaki_shinsei(t, tight, result)
+    elif company == "アーキテックス㈱":
+        parse_architex(t, tight, result)
 
     # 日付補完
     dates = extract_dates_perfect(t, tight, company, COMPANY_LABEL_MAP.get(company, {}))
     if not result["date"]:         result["date"]         = dates.get("date")
     if not result["billing_date"]: result["billing_date"] = dates.get("billing_date")
-    if company not in ("㈱グローブホーム", "住友不動産ハウジング㈱", "ファースト住建㈱"):
+    if company not in ("㈱グローブホーム", "住友不動産ハウジング㈱", "ファースト住建㈱", "アーキテックス㈱"):
         if not result["startDate"]: result["startDate"] = dates.get("startDate")
         if not result["endDate"]:   result["endDate"]   = dates.get("endDate")
 
