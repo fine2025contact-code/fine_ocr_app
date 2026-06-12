@@ -788,29 +788,25 @@ def parse_architex(t: str, tight: str, result: dict):
     if m_id:
         result["id"] = m_id.group(1)
 
-    # ★ 発注金額（税込合計） = 小計 + 消費税額
-    # 「発注金額」ラベルが値の後に来るため、小計＋税で計算する
-    m_kei = re.search(r"小\s*計[^\d]*([\d,]+)", t)
-    m_tax = re.search(r"消費税[額]?[^\d]*([\d,]+)", t)
-    if m_kei and m_tax:
-        kei = _num(m_kei.group(1))
-        tax = _num(m_tax.group(1))
-        if 5000 <= kei <= 9_000_000 and 0 < tax <= kei:
-            result["amount"] = kei + tax
-    # フォールバック: 全金額の最大値
+    # ★ 発注金額（税込合計）
+    # テーブル集計行「小計 [小計額] [消費税額] [発注金額]」の第3列を取得
+    # ※ 先頭の「小計 消費税額 発注金額」はラベル行のため数字が続かず誤マッチしない
+    m_kei_row = re.search(r"小計\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)", t)
+    if m_kei_row:
+        result["amount"] = _num(m_kei_row.group(1))  # 第1列 = 発注金額(税込) ※PyMuPDFは右列から抽出
+    # フォールバック: 「XXX円 YYY円 ZZZ円」形式（上部集計ボックス）の最後の値
     if not result.get("amount") or result["amount"] <= 0:
-        all_amts = [_num(a) for a in re.findall(r"([\d,]{4,10})円", t)]
-        valid = [v for v in all_amts if 10_000 <= v <= 9_000_000]
-        if valid:
-            result["amount"] = max(valid)
+        m_3amt = re.search(r"([\d,]+)円\s*([\d,]+)円\s*([\d,]+)円", t)
+        if m_3amt:
+            val = _num(m_3amt.group(3))
+            if 10_000 <= val <= 9_000_000:
+                result["amount"] = val
 
-    # ★ 工事内容（案件名の直下の行 = 工種名、ラベルなし）
-    # 例: 案件名：KH 平井 善大様邸 新築工事\n屋内給排水工事
-    m_content = re.search(r"案件名[：:][^\n]*\n\s*([^\n]{3,40})", t)
+    # ★ 工事内容: 発注日の直前に来る「〇〇工事」の行を取得
+    # テキスト構造: 「屋内給排水工事\n発注日：」
+    m_content = re.search(r"([^\n]{3,30}工事)\n発注日[：:]", t)
     if m_content:
-        content = m_content.group(1).strip()
-        if "工事" in content:
-            result["content"] = content
+        result["content"] = m_content.group(1).strip()
 
     # ★ 住所：アーキテックス発注書に現場住所フィールドなし → 本社住所を誤検知しないよう "-" に固定
     result["address"] = "-"
