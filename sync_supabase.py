@@ -142,9 +142,9 @@ def insert_fine_row(
 
     raw_kouki = row.get("8. 工期") or fd.get("no8_kouki")
     raw_nouki = row.get("8-1. 納期") or fd.get("no8_1_nouki")
-    db_start = _iso_date_from_cell(raw_kouki) if raw_kouki and raw_kouki not in ("-", "") else iso_date
-    db_end   = _iso_date_from_cell(raw_nouki) if raw_nouki and raw_nouki not in ("-", "") else (
-               _iso_date_from_cell(raw_kouki) if raw_kouki and raw_kouki not in ("-", "") else None)
+    # 工期・納期が空の場合は None（空欄）のまま。start_date のみ発注日をデフォルトとする
+    db_start = _iso_date_from_cell(raw_kouki) if raw_kouki and str(raw_kouki).strip() not in ("-", "") else iso_date
+    db_end   = _iso_date_from_cell(raw_nouki) if raw_nouki and str(raw_nouki).strip() not in ("-", "") else None
 
     # ★ projects テーブルのみに登録（orders/order_itemsは登録しない）
     # ★ 送信担当者（app.pyから渡される）

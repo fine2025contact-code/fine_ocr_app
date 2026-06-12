@@ -820,13 +820,12 @@ def parse_architex(t: str, tight: str, result: dict):
     if idx_anken >= 0:
         before_anken = t[:idx_anken]
         after_anken  = t[idx_anken:]
-        # 工程終了日: 案件名より前の最後の日付
+        # 工程終了日: 案件名より前の最後の日付 → 納期(endDate)のみ設定
+        # ※ 工程開始日は空欄の場合が多いため startDate には自動コピーしない
         dates_before = re.findall(r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", before_anken)
         if dates_before:
             y, m, d = dates_before[-1]
             result["endDate"] = _fmt(y, m, d)
-            if not result.get("startDate"):
-                result["startDate"] = result["endDate"]
         # 出力日: 案件名より後の最初の日付
         dates_after = re.findall(r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", after_anken)
         if dates_after:
@@ -857,11 +856,29 @@ def parse_abe(t: str, tight: str, result: dict):
         if amt_str.isdigit() and int(amt_str) >= 5000 and int(amt_str) > result.get("amount", 0):
             result["amount"] = int(amt_str)
 
+    # ★ 工期（令和 範囲形式）: 「工　期令和8年01月06日 〜 令和8年05月06日」
+    def _rw(s): return 2018 + (1 if s == "元" else int(s))
+    m_kouki_reiwa = re.search(
+        r"工\s*期\s*令和(\d{1,2}|元)年\s*(\d{1,2})月\s*(\d{1,2})日\s*[～〜~]\s*令和(\d{1,2}|元)年\s*(\d{1,2})月\s*(\d{1,2})日",
+        t
+    )
+    if m_kouki_reiwa:
+        result["startDate"] = _fmt(_rw(m_kouki_reiwa.group(1)), m_kouki_reiwa.group(2), m_kouki_reiwa.group(3))
+        result["endDate"]   = _fmt(_rw(m_kouki_reiwa.group(4)), m_kouki_reiwa.group(5), m_kouki_reiwa.group(6))
+
+    # ★ 工事内容: 発注内容ラベルの直下の行を最優先で取得
+    # 例: 発注内容\n給排水設備工事
     content_val = None
-    m_content_tight = re.search(r"(?:工事件名|件名|工事名)(.+?)(?=施工場所|現場住所|工期|現場ID|現場|契約|発注|小計|消費|合計|$)", tight_fixed)
-    if m_content_tight:
-        raw = m_content_tight.group(1).strip()
+    m_content_hatchu = re.search(r"発注内容[\s\n:：]*([^\n]{3,40})", t)
+    if m_content_hatchu:
+        raw = m_content_hatchu.group(1).strip()
         if len(raw) >= 3: content_val = raw
+
+    if not content_val:
+        m_content_tight = re.search(r"(?:工事件名|件名|工事名)(.+?)(?=施工場所|現場住所|工期|現場ID|現場|契約|発注|小計|消費|合計|$)", tight_fixed)
+        if m_content_tight:
+            raw = m_content_tight.group(1).strip()
+            if len(raw) >= 3: content_val = raw
 
     if not content_val:
         m_content_line = re.search(r"(?:工事件名|件名|工事名)[\s\n:：]*([^\n]{5,50})", t)
@@ -1104,7 +1121,11 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
         if not result["startDate"]: result["startDate"] = dates.get("startDate")
         if not result["endDate"]:   result["endDate"]   = dates.get("endDate")
 
-    if not result["startDate"] and result["date"] and result["company"] != "ファースト住建㈱":
+    # 工期(startDate)が空の場合、発注日で補完する（工期・納期が分かれていない会社のみ）
+    # ※ アーキテックスは工程開始日が空欄のため補完しない
+    # 工期(startDate)が空の場合、発注日で補完する（工期・納期が分かれていない会社のみ）
+    # ※ アーキテックス・阿部建設は工期を専用パーサーで取得するため補完しない
+    if not result["startDate"] and result["date"] and result["company"] not in ("ファースト住建㈱", "アーキテックス㈱", "阿部建設㈱"):
         result["startDate"] = result["date"]
 
     if not result["id"]:
