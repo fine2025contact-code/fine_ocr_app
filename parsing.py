@@ -1008,7 +1008,8 @@ def build_display_fields(result: dict) -> dict:
         "no5_amount":       _amount_fmt(result.get("amount")),
         "no6_content":      _v(result.get("content")),
         "no7_date":         _v(result.get("date")),
-        "no8_kouki":        _date_range(result.get("startDate"), result.get("endDate")),
+        "no8_kouki":        _v(result.get("startDate")),
+        "no8_1_nouki":      _v(result.get("endDate")),
         "no9_billing_date": _v(result.get("billing_date")),
         "no10_doc_type":    _v(result.get("docType")),
     }

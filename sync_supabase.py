@@ -16,8 +16,9 @@ app.py キー                    → DB フィールド
 3. 現場名(事業名)              → name
 4. 施工場所(現場住所)          → site_address
 5. 代金(金額)                  → budget
-7. 注文書年月日(発注日)        → start_date
-8. 工期                        → end_date
+7. 注文書年月日(発注日)        → start_date（発注日）
+8. 工期                        → start_date（工期開始）
+8-1. 納期                      → end_date（納期・工期終了）
 """
 
 from __future__ import annotations
@@ -140,8 +141,10 @@ def insert_fine_row(
     )
 
     raw_kouki = row.get("8. 工期") or fd.get("no8_kouki")
-    db_end   = _db_end_date_from_k(raw_kouki) if raw_kouki else None
-    db_start = _db_start_date_from_k(raw_kouki) if raw_kouki else iso_date
+    raw_nouki = row.get("8-1. 納期") or fd.get("no8_1_nouki")
+    db_start = _iso_date_from_cell(raw_kouki) if raw_kouki and raw_kouki not in ("-", "") else iso_date
+    db_end   = _iso_date_from_cell(raw_nouki) if raw_nouki and raw_nouki not in ("-", "") else (
+               _iso_date_from_cell(raw_kouki) if raw_kouki and raw_kouki not in ("-", "") else None)
 
     # ★ projects テーブルのみに登録（orders/order_itemsは登録しない）
     # ★ 送信担当者（app.pyから渡される）

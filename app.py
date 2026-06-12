@@ -215,7 +215,8 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
         "5. 代金(金額)":            int(amt) if isinstance(amt, (int, float)) else amt,
         "6. 工事件名(内容/名称)":    parsed.get("content") or "不明",
         "7. 注文書年月日(発注日)":   parsed.get("date") or "-",
-        "8. 工期":                  kouki,
+        "8. 工期":                  sd or "-",
+        "8-1. 納期":               ed or "",
         "9. 請求日":                parsed.get("billing_date") or "",
         "10. 注文書種類":           parsed.get("docType") or "注文書",
         "注文No(F18)":             "-",
@@ -232,7 +233,7 @@ EDITOR_COLUMNS = [
     "3. 現場名(事業名)", "3-1. 工事名(邸名)",
     "4. 施工場所(現場住所)", "5. 代金(金額)",
     "6. 工事件名(内容/名称)", "7. 注文書年月日(発注日)",
-    "8. 工期", "9. 請求日", "10. 注文書種類",
+    "8. 工期", "8-1. 納期", "9. 請求日", "10. 注文書種類",
     "注文No(F18)", "ステータス",
 ]
 
@@ -431,9 +432,9 @@ def main() -> None:
                 format_func=lambda x: "担当者を選択..." if x == "" else x, key=f"manual_staff_{_mfk}")
             col_date1, col_date2 = st.columns(2)
             with col_date1:
-                manual_start = st.date_input("工期（開始）", key=f"manual_start_{_mfk}", value=None)
+                manual_start = st.date_input("工期", key=f"manual_start_{_mfk}", value=None)
             with col_date2:
-                manual_end = st.date_input("工期（終了）", key=f"manual_end_{_mfk}", value=None)
+                manual_end = st.date_input("納期", key=f"manual_end_{_mfk}", value=None)
 
         send_ok = bool(manual_staff and manual_client and manual_name)
         if st.button("📤 元請発注書なしで登録・送信", type="primary",
@@ -451,7 +452,8 @@ def main() -> None:
                         "5. 代金(金額)": manual_amount,
                         "6. 工事件名(内容/名称)": manual_name,
                         "7. 注文書年月日(発注日)": "",
-                        "8. 工期": f"{manual_start} ~ {manual_end}" if manual_start and manual_end else "",
+                        "8. 工期":    str(manual_start) if manual_start else "",
+                        "8-1. 納期": str(manual_end)   if manual_end   else "",
                         "2. 契約番号(注文/工事)": "",
                         "2-1. 現場ID/契約枝番号": "",
                         "2-2. 発注枝番": "",
