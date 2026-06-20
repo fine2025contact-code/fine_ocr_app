@@ -219,7 +219,7 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
         "8-1. 納期":               ed or "",
         "9. 請求日":                parsed.get("billing_date") or "",
         "10. 注文書種類":           parsed.get("docType") or "注文書",
-        "注文No(F18)":             "-",
+        "注文No(F番号)":             "-",
         "ステータス":               "未送信",
         "fields_display":          parsed.get("fields_display", {}),
     }
@@ -234,7 +234,7 @@ EDITOR_COLUMNS = [
     "4. 施工場所(現場住所)", "5. 代金(金額)",
     "6. 工事件名(内容/名称)", "7. 注文書年月日(発注日)",
     "8. 工期", "8-1. 納期", "9. 請求日", "10. 注文書種類",
-    "注文No(F18)", "ステータス",
+    "注文No(F番号)", "ステータス",
 ]
 
 
@@ -547,7 +547,7 @@ def main() -> None:
                 "送信": st.column_config.CheckboxColumn("送信", default=False),
                 "元請発注書なし": st.column_config.CheckboxColumn("📄 元請発注書なし", default=False),
                 "5. 代金(金額)": st.column_config.NumberColumn("5. 代金(金額)", format="¥%d", min_value=-99000000),
-                "注文No(F18)": st.column_config.TextColumn("注文No", disabled=True, help="F番号は振り分け画面で割り当てられます"),
+                "注文No(F番号)": st.column_config.TextColumn("注文No", disabled=True, help="F番号（F190001〜）は振り分け画面で割り当てられます。毎年3/1にプレフィックスが更新されます。"),
                 "ステータス": st.column_config.SelectboxColumn(
                     "ステータス", options=["未送信", "完了", "エラー"], disabled=True
                 ),
@@ -613,7 +613,7 @@ def sync_data(edf: pd.DataFrame, supabase: Client, sent_by: str):
                 row_dict["has_client_order"] = not bool(row_dict.get("元請発注書なし", False))
                 # ★ F番号はOCR時点では割り当てない（振り分け画面で割り当てる）
                 insert_fine_row(supabase, row_dict, "")
-                edf.at[idx, "注文No(F18)"] = "振り分け時に割当"
+                edf.at[idx, "注文No(F番号)"] = "振り分け時に割当"
                 edf.at[idx, "ステータス"] = "完了"
                 edf.at[idx, "送信"] = False
                 success_count += 1

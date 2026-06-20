@@ -33,8 +33,11 @@ from supabase import Client
 from parsing import resolve_client_id
 
 
-# ★ F18関連の採番関数は削除
-# 発注書（F番号）の採番・作成はすべて振り分け画面（OrderDistributor）で行う
+# ★ F番号の採番ロジック（毎年3/1にプレフィックス更新）
+# 2026年度: F190001〜  2027年度: F200001〜  2028年度: F210001〜
+# 発注書（F番号）の採番・作成はすべて振り分け画面（OrderDistributor）で行う。
+# 採番が必要な場合は fiscal_utils.generate_doc_no() を使用すること。
+from fiscal_utils import get_doc_prefix, generate_doc_no  # noqa: F401 (将来利用用)
 
 
 
