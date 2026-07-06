@@ -199,7 +199,7 @@ def _normalize_text(text: str) -> str:
         "清市": "清須市", "西:枇杷島": "西枇杷島", "西:仁島": "西枇杷島",
         "小山井": "小田井", "文年川日": "注文年月日", "町丁目西_": "町",
         "阿部培設": "阿部建設",
-        "多加良": "多加良浦", "253,500": "258,500", "253500": "258500",
+        "多加良": "多加良浦",
         "一り_": "1月16日", "》可": "令和", "ド,": "1,", "ooo": "000",
         "契約那号": "契約番号", "本作発i": "本作発", "微妹": "邸", "祈築": "新築",
         "工丁": "工事", "川合微妹": "川合徹様 幸代様邸", "川合バ井": "川合徹様 幸代様邸",
@@ -511,8 +511,9 @@ def parse_universal(t: str, tight: str, result: dict, company: str):
         m_amt = re.search(f"{re.escape(lbl_amount)}[^\\d]*([\\d,]+)", tight)
         if m_amt:
             amt_val = _num(m_amt.group(1))
-            # ★ マイナス金額が既に設定されている場合は上書きしない
-            if 1000 <= amt_val <= 9000000 and result.get("amount", 0) > 0:
+            # ★ マイナス金額（値引き等）が既に設定されている場合のみ上書きしない。
+            #   未検出(0)の場合はラベル金額で補完する（>0 だと 0→正 の補完が漏れるため >=0 に修正）。
+            if 1000 <= amt_val <= 9000000 and result.get("amount", 0) >= 0:
                 result["amount"] = amt_val
 
     lbl_doc = labels.get("doc_type")
@@ -576,13 +577,14 @@ def parse_sumitomo_vertical(t: str, result: dict):
         s = re.sub(r'[_＿]+', ' ', s).strip()
         return re.sub(r'\s{2,}', ' ', s)
 
-    for pat in [
-        r'工事名称\s*(.+?)(?=現場住所)',          # 工事名称XXX現場住所 の形（1行連結）
-        r'工事名称\s*([^\n\t]{2,30}?)(?=\s*$|\n)', # 行末まで（改行で終わる）
-        r'工事名称\n([^\n]{2,30})',               # 次行にある
-        r'工事名称(.+?)\n現場住所',               # 旧パターン（改行をまたぐ）
+    # ★ (パターン, フラグ) のペアで管理（旧: 'DOTALL' not in pat は常にTrueで無意味だった）
+    for pat, flags in [
+        (r'工事名称\s*(.+?)(?=現場住所)',          re.DOTALL),  # 工事名称XXX現場住所 の形（1行連結）
+        (r'工事名称\s*([^\n\t]{2,30}?)(?=\s*$|\n)', 0),          # 行末まで（改行で終わる）
+        (r'工事名称\n([^\n]{2,30})',               0),          # 次行にある
+        (r'工事名称(.+?)\n現場住所',               re.DOTALL),  # 旧パターン（改行をまたぐ）
     ]:
-        m = re.search(pat, t, re.DOTALL if 'DOTALL' not in pat else 0)
+        m = re.search(pat, t, flags)
         if m:
             name = _clean_name(m.group(1))
             if name and '現場住所' not in name and len(name) >= 2:
@@ -1122,9 +1124,7 @@ def parse_ocr_text(text: str, file_name: str = "") -> dict[str, Any]:
         if not result["endDate"]:   result["endDate"]   = dates.get("endDate")
 
     # 工期(startDate)が空の場合、発注日で補完する（工期・納期が分かれていない会社のみ）
-    # ※ アーキテックスは工程開始日が空欄のため補完しない
-    # 工期(startDate)が空の場合、発注日で補完する（工期・納期が分かれていない会社のみ）
-    # ※ アーキテックス・阿部建設は工期を専用パーサーで取得するため補完しない
+    # ※ アーキテックス・阿部建設・ファースト住建は工期を専用パーサーで取得するため補完しない
     if not result["startDate"] and result["date"] and result["company"] not in ("ファースト住建㈱", "アーキテックス㈱", "阿部建設㈱"):
         result["startDate"] = result["date"]
 

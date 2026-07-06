@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FINE 金額バグ是正 修正計画</title>
+<style>
+  :root{
+    --ink:#1f1e1b; --muted:#5f5e5a; --hint:#8a8980; --line:#e2e0d7;
+    --card:#ffffff; --page:#f7f6f1; --head:#eef1f5;
+    --inc-bg:#E6F1FB; --inc-tx:#0C447C;
+    --exc-bg:#EAF3DE; --exc-tx:#27500A;
+    --tax-bg:#FAEEDA; --tax-tx:#633806;
+    --warn-bg:#FCEBEB; --warn-tx:#791F1F;
+    --ok-bg:#E1F5EE; --ok-tx:#0F6E56;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);
+    font-family:-apple-system,"Segoe UI","Hiragino Sans","Yu Gothic UI",Meiryo,sans-serif;
+    line-height:1.55;padding:26px 22px 40px}
+  .sheet{max-width:980px;margin:0 auto}
+  h1{font-size:21px;font-weight:600;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+  h2{font-size:15px;font-weight:600;margin:22px 0 8px;padding-bottom:5px;border-bottom:2px solid var(--line)}
+  p{margin:6px 0}
+  .note{background:#fcf8ec;border:1px solid #f0e2b8;border-radius:8px;padding:10px 12px;font-size:12.5px;margin:10px 0}
+  .pill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;white-space:nowrap;font-weight:600}
+  .inc{background:var(--inc-bg);color:var(--inc-tx)}
+  .exc{background:var(--exc-bg);color:var(--exc-tx)}
+  .tax{background:var(--tax-bg);color:var(--tax-tx)}
+  .warn{background:var(--warn-bg);color:var(--warn-tx)}
+  .ok{background:var(--ok-bg);color:var(--ok-tx)}
+  table{width:100%;border-collapse:collapse;background:var(--card);font-size:12.5px;margin:8px 0;
+    border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  thead th{background:var(--head);text-align:left;font-weight:600;color:var(--muted);
+    padding:7px 10px;border-bottom:1px solid var(--line);font-size:11.5px}
+  tbody td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  code{font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:11.5px;background:#f2f1ea;padding:1px 5px;border-radius:4px}
+  .ph{display:flex;align-items:baseline;gap:8px}
+  .ph .n{display:inline-flex;width:24px;height:24px;flex:0 0 24px;align-items:center;justify-content:center;
+    background:#1f6feb;color:#fff;border-radius:50%;font-size:12px;font-weight:600}
+  .c{text-align:center;white-space:nowrap}
+  ol,ul{margin:6px 0 6px 4px;padding-left:20px}
+  li{margin:3px 0;font-size:13px}
+  .meta{font-size:11.5px;color:var(--hint);margin:4px 0 0}
+  footer{margin-top:18px;font-size:12px;color:var(--hint);line-height:1.6;border-top:1px solid var(--line);padding-top:10px}
+  .pbtn{display:inline-flex;align-items:center;gap:6px;margin:0 0 16px;padding:8px 14px;
+    background:#1f6feb;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
+  @media print{
+    @page{size:A4;margin:12mm}
+    body{background:#fff;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .pbtn{display:none}
+    h2{break-after:avoid}
+    table,.note,.phase{break-inside:avoid}
+    tr{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <button class="pbtn" onclick="window.print()">印刷 / PDF保存</button>
+  <h1>FINE 金額バグ是正 修正計画（最初からの手順書）</h1>
+  <p class="sub">FINE工事管理 / fine_ocr_app / Supabase ・ 2026-06-30</p>
+  <p class="note"><b>原則：</b>お金に直結するため「<b>仕様合意 → 土台 → 確実な是正 → 端数根絶 → 検証</b>」の順。各段階で確認をはさみ、いつでも戻せる状態を保つ。</p>
+
+  <h2>前提：基本となる税ルール（過去方針で確定済み）</h2>
+  <table>
+    <thead><tr><th style="width:34%">区分</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td>DB保存（明細・単価・発注）</td><td><span class="pill exc">税抜</span> <code>unit_price</code> / <code>order.total_amount</code> / <code>*_lines.amount</code></td></tr>
+      <tr><td>受注・合計</td><td><span class="pill inc">税込</span> <code>budget</code> / <code>billing_amount</code> / <code>estimates・invoices.total_amount</code></td></tr>
+      <tr><td>管理費</td><td><span class="pill inc">税込</span>で保存（<code>management_fee</code>）</td></tr>
+      <tr><td>画面表示</td><td><span class="pill inc">税込で統一</span>（税抜は補助表示）</td></tr>
+      <tr><td>粗利</td><td><span class="pill exc">税抜ベース</span></td></tr>
+      <tr><td>消費税</td><td><code>floor(課税対象 × 0.1)</code>（課税行のみ）</td></tr>
+    </tbody>
+  </table>
+  <p class="meta">この表が「正」。全修正はこの表に一致させることがゴール。</p>
+
+  <h2><span class="ph"><span class="n">0</span> 準備・安全網（コード変更なし）</span></h2>
+  <ol>
+    <li><b>Gitバックアップ</b>：<code>git switch -c fix/money-reconcile</code> → <code>git commit</code>。</li>
+    <li><b>Supabaseバックアップ</b>：<code>projects / orders / invoices / estimates / *_deposits / order_payments</code> をエクスポート。</li>
+    <li><b>検証ケース</b>：数字が分かる案件を3〜5件選び、受注・外注・粗利・入金・支払・残の正解値を控える。</li>
+    <li><b>確認環境</b>：可能ならステージング（別Supabase）で先に試す。</li>
+  </ol>
+  <p class="meta">リスク：なし／所要：小</p>
+
+  <h2><span class="ph"><span class="n">1</span> 仕様の最終合意（要・ご判断）</span></h2>
+  <table>
+    <thead><tr><th style="width:26%">決める項目</th><th>選択肢</th><th style="width:24%">推奨</th></tr></thead>
+    <tbody>
+      <tr><td>入金照合の基準</td><td>budget（現状）／請求書発行済なら <code>invoice.total_amount</code></td><td>まず警告表示→将来は請求額基準</td></tr>
+      <tr><td>管理費の粗利扱い</td><td>ラベルを「税込」に直す（最小）／粗利で <code>toEx</code> 換算（2ファイル同時）</td><td>ラベル修正（最小）</td></tr>
+      <tr><td>documents の税計算</td><td>課税/非課税を区別する／現状維持</td><td>区別する</td></tr>
+      <tr><td>ProjectForm budget未入力時</td><td>税抜小計を代入（現状）／税込換算／必須化</td><td>税込換算 or 必須化</td></tr>
+      <tr><td>OCR金額の税区分</td><td>常に税込合計のみ採用／税区分フラグを持たせる</td><td>税込合計のみ採用</td></tr>
+      <tr><td>budget_ex 保存（往復解消）</td><td>採用（カラム追加）／許容差のみ</td><td>採用（根絶する場合）</td></tr>
+    </tbody>
+  </table>
+  <p class="meta">リスク：なし（合意のみ）</p>
+
+  <h2><span class="ph"><span class="n">2</span> 土台 — 税計算の共通化 <span class="pill ok">リスク低</span></span></h2>
+  <ul>
+    <li>3ファイル（f18Dashboard / OrderDistributor / PaymentAdmin）の <code>toInc/toEx</code> を<b>差分確認</b>。</li>
+    <li><code>lib/tax.js</code> を新規作成（<code>toInc / toEx / EPS=10 / settled()</code>）し、重複定義を import に置換。</li>
+  </ul>
+  <p class="meta">検証：各画面で修正前後の表示金額が一致／ロールバック：ブランチ破棄</p>
+
+  <h2><span class="ph"><span class="n">3</span> 確定済み修正の仕上げ＋マイグレーション <span class="pill ok">リスク低〜中</span></span></h2>
+  <ul>
+    <li><b>マイグレーション実行</b>：<code>add_invoice_lines_tax_type.sql</code>（A-2の前提。未実行だと請求保存がエラー）。</li>
+    <li>既適用分（A-1〜A-6 / B-1 / B-3 / B-5 / C-1 / C-2 / D-1 / D-3 / Dashboard粗利）を <code>npm run build</code> と <code>py_compile</code> で確認。</li>
+  </ul>
+  <p class="meta">ロールバック：<code>ALTER TABLE invoice_lines DROP COLUMN tax_type;</code></p>
+
+  <h2><span class="ph"><span class="n">4</span> 入出金管理の確実な是正 <span class="pill warn">リスク中・最重要</span></span></h2>
+  <table>
+    <thead><tr><th style="width:6%">#</th><th style="width:22%">箇所</th><th>修正</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td class="meta">checkAndAutoComplete 277/286</td><td>自動完了の支払判定を <code>outsourceCostInc</code>（税込）に統一</td></tr>
+      <tr><td>2</td><td class="meta">285/286・576–579</td><td>完了・残判定に許容差 <code>EPS</code>（<code>- EPS</code> / <code>settled()</code>）</td></tr>
+      <tr><td>3</td><td class="meta">1334/1379</td><td>残額バッジ <code>!==0</code> → <code>Math.abs(x) &gt; EPS</code></td></tr>
+      <tr><td>4</td><td class="meta">1130</td><td>統合伝票の突合を金額一致 → <code>mergedRefs.id</code> 参照に</td></tr>
+    </tbody>
+  </table>
+  <p class="meta">EPSは10円程度に固定。自動完了はDB書込のため誤完了時に戻せるように。</p>
+
+  <h2><span class="ph"><span class="n">5</span> 端数の根絶（中期） <span class="pill warn">リスク中〜高</span></span></h2>
+  <ul>
+    <li><b>集計ルールの固定</b>：協力会社支払＝注文書単位で課税のまま実額照合は <code>settled()</code>／粗利等は「税抜合算→一度だけ課税」。</li>
+    <li><b>budget_ex 二基準保存</b>：<code>projects.budget_ex</code> 追加→既存は <code>round(budget/1.1)</code> でバックフィル→保存処理で両方確定→<code>÷1.1</code> 箇所を全文検索で置換。</li>
+  </ul>
+  <p class="meta">リスク：DB変更＋表示が数円動く。読み替え漏れに注意／ロールバック：読み出しを旧 ÷1.1 に戻すだけ（追加方式で安全）</p>
+
+  <h2><span class="ph"><span class="n">6</span> 要判断項目の反映（フェーズ1の合意に従う）</span></h2>
+  <ul>
+    <li><code>documents</code>：税計算を課税/非課税区分に対応（過大課税の是正）。</li>
+    <li><code>ProjectForm</code>：budget未入力時の代入を合意方式に。</li>
+    <li>入金照合：請求額と budget の食い違いを警告 or 基準切替。</li>
+    <li>管理費：ラベル/粗利の扱いを <code>f18Dashboard</code> と同時に。</li>
+    <li>OCR(B-2)：「税込合計のみ採用」を運用ルール化。</li>
+  </ul>
+
+  <h2><span class="ph"><span class="n">7</span> 検証・回帰・本番反映</span></h2>
+  <ol>
+    <li>ビルド/構文：<code>npm run build</code> / <code>python -m py_compile</code>。</li>
+    <li>数値回帰：検証ケースで修正前後の金額・完了判定を突合。</li>
+    <li>画面横断：同一案件の金額が全画面で一致するか。</li>
+    <li>段階反映：ステージング → 少数案件 → 全体。バックアップ後に本番マイグレーション。</li>
+  </ol>
+
+  <h2>実施順と難易度</h2>
+  <table>
+    <thead><tr><th style="width:10%">フェーズ</th><th>内容</th><th style="width:16%">リスク</th><th>効果</th></tr></thead>
+    <tbody>
+      <tr><td class="c">0</td><td>バックアップ・テスト準備</td><td class="c"><span class="pill ok">なし</span></td><td>安全網</td></tr>
+      <tr><td class="c">1</td><td>仕様の最終合意</td><td class="c"><span class="pill ok">なし</span></td><td>手戻り防止</td></tr>
+      <tr><td class="c">2</td><td>税計算の共通化</td><td class="c"><span class="pill ok">低</span></td><td>土台</td></tr>
+      <tr><td class="c">3</td><td>既修正の仕上げ＋移行</td><td class="c"><span class="pill tax">低〜中</span></td><td>既知バグ確定</td></tr>
+      <tr><td class="c">4</td><td>入出金管理の是正</td><td class="c"><span class="pill warn">中</span></td><td>誤完了・永久残の解消（最重要）</td></tr>
+      <tr><td class="c">5</td><td>端数の根絶</td><td class="c"><span class="pill warn">中〜高</span></td><td>構造的解消</td></tr>
+      <tr><td class="c">6</td><td>要判断項目</td><td class="c"><span class="pill tax">中</span></td><td>仕様整合</td></tr>
+      <tr><td class="c">7</td><td>検証・回帰・反映</td><td class="c">—</td><td>品質保証</td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    最小で効くのは<b>フェーズ2〜4</b>（共通化＋入出金の是正）。ここまでで「払っていないのに完了」「残が消えない」は解消。フェーズ5はDB移行を伴う本丸のため段階適用＋検証を厚めに。<br>
+    <b>次アクション：</b>フェーズ0（Gitコミット）を実施し、フェーズ1の要判断6項目を決定。決定後フェーズ2→3→4の順に着手。
+  </footer>
+</div>
+</body>
+</html>

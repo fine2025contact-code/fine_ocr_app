@@ -139,15 +139,30 @@ def insert_fine_row(
 
     # 5. 住所・金額・工期
     site_address = str(row.get("4. 施工場所(現場住所)") or fd.get("no4_address") or "")
-    budget = _to_float_amount(
-        row.get("5. 代金(金額)") or fd.get("no5_amount") or 0
-    )
+    # ★ 金額は 0 を有効値として扱う（`or` だと 0 が falsy 判定で旧値に戻るため None/空のみフォールバック）
+    _raw_amount = row.get("5. 代金(金額)")
+    if _raw_amount is None or (isinstance(_raw_amount, str) and _raw_amount.strip() == ""):
+        _raw_amount = fd.get("no5_amount")
+    budget = _to_float_amount(_raw_amount if _raw_amount is not None else 0)
 
     raw_kouki = row.get("8. 工期") or fd.get("no8_kouki")
     raw_nouki = row.get("8-1. 納期") or fd.get("no8_1_nouki")
     # 工期・納期が空の場合は None（空欄）のまま。start_date のみ発注日をデフォルトとする
-    db_start = _iso_date_from_cell(raw_kouki) if raw_kouki and str(raw_kouki).strip() not in ("-", "") else iso_date
-    db_end   = _iso_date_from_cell(raw_nouki) if raw_nouki and str(raw_nouki).strip() not in ("-", "") else None
+    # ★ 「2026-01-06 ~ 2026-05-06」のような範囲文字列にも対応（最初/最後の日付を抽出）
+    #   パース不能な文字列で本日の日付が無警告に入るのを防ぐため、まず範囲対応パーサーを試す
+    if raw_kouki and str(raw_kouki).strip() not in ("-", ""):
+        # パース不能な文字列（例:「未定」）は発注日にフォールバック
+        db_start = _db_start_date_from_k(raw_kouki) or iso_date
+    else:
+        db_start = iso_date
+    if raw_nouki and str(raw_nouki).strip() not in ("-", ""):
+        # パース不能な納期は None（空欄）のまま
+        db_end = _db_end_date_from_k(raw_nouki)
+    else:
+        # ★ 納期が空で、工期セルに範囲（開始~終了）が入っている場合は終了日を納期とする
+        db_end = _db_end_date_from_k(raw_kouki) if raw_kouki else None
+        if db_end == db_start:
+            db_end = None
 
     # ★ projects テーブルのみに登録（orders/order_itemsは登録しない）
     # ★ 送信担当者（app.pyから渡される）
@@ -176,15 +191,21 @@ def insert_fine_row(
     new_project_id = proj_data[0]["id"]
 
     # ★ ocr_logs に送信記録を保存
-    ocr_log_body: dict[str, Any] = {
-        "project_id": new_project_id,
-        "sent_by": sent_by,
-        "file_name": str(row.get("ファイル名", "")),
-        "client_name": moto_name,
-        "project_name": name,
-        "amount": budget,
-    }
-    supabase.table("ocr_logs").insert(ocr_log_body).execute()
+    # ※ projects への登録は既に成功しているため、ログ保存の失敗で例外を投げると
+    #   アプリ側が「エラー」表示→再送信→projects二重登録につながる。
+    #   ログ失敗は警告出力のみにとどめ、送信自体は成功として扱う。
+    try:
+        ocr_log_body: dict[str, Any] = {
+            "project_id": new_project_id,
+            "sent_by": sent_by,
+            "file_name": str(row.get("ファイル名", "")),
+            "client_name": moto_name,
+            "project_name": name,
+            "amount": budget,
+        }
+        supabase.table("ocr_logs").insert(ocr_log_body).execute()
+    except Exception as log_err:
+        print(f"[WARN] ocr_logs への記録に失敗しました（projects登録は成功済み）: {log_err}")
 
     # ★ orders / order_items への書き込みはここで終了
     # 発注書（F番号）は振り分け画面（OrderDistributor）で作成する

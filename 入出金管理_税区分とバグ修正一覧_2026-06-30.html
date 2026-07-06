@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>入出金管理 税区分・バグ修正一覧</title>
+<style>
+  :root{
+    --ink:#1f1e1b; --muted:#5f5e5a; --hint:#8a8980; --line:#e2e0d7;
+    --card:#ffffff; --page:#f7f6f1; --head:#eef1f5;
+    --inc-bg:#E6F1FB; --inc-tx:#0C447C;
+    --exc-bg:#EAF3DE; --exc-tx:#27500A;
+    --tax-bg:#FAEEDA; --tax-tx:#633806;
+    --warn-bg:#FCEBEB; --warn-tx:#791F1F;
+    --ok-bg:#E1F5EE; --ok-tx:#0F6E56;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);
+    font-family:-apple-system,"Segoe UI","Hiragino Sans","Yu Gothic UI",Meiryo,sans-serif;
+    line-height:1.55;padding:26px 22px 40px}
+  .sheet{max-width:980px;margin:0 auto}
+  h1{font-size:21px;font-weight:600;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+  h2{font-size:15px;font-weight:600;margin:22px 0 8px;padding-bottom:5px;border-bottom:2px solid var(--line)}
+  .legend{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin:0 0 14px;font-size:12px;color:var(--muted)}
+  .pill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;white-space:nowrap;font-weight:600}
+  .inc{background:var(--inc-bg);color:var(--inc-tx)}
+  .exc{background:var(--exc-bg);color:var(--exc-tx)}
+  .tax{background:var(--tax-bg);color:var(--tax-tx)}
+  .warn{background:var(--warn-bg);color:var(--warn-tx)}
+  .ok{background:var(--ok-bg);color:var(--ok-tx)}
+  table{width:100%;border-collapse:collapse;background:var(--card);font-size:12.5px;margin:0 0 6px;
+    border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  thead th{background:var(--head);text-align:left;font-weight:600;color:var(--muted);
+    padding:8px 10px;border-bottom:1px solid var(--line);font-size:11.5px}
+  tbody td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  code{font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:11.5px;
+    background:#f2f1ea;padding:1px 5px;border-radius:4px}
+  .ln{font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:11px;color:var(--hint);white-space:nowrap}
+  .c{text-align:center;white-space:nowrap}
+  footer{margin-top:18px;font-size:12px;color:var(--hint);line-height:1.6}
+  .pbtn{display:inline-flex;align-items:center;gap:6px;margin:0 0 16px;padding:8px 14px;
+    background:#1f6feb;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
+  @media print{
+    @page{size:A4;margin:12mm}
+    body{background:#fff;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .pbtn{display:none}
+    table{break-inside:auto}
+    tr{break-inside:avoid}
+    h2{break-after:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <button class="pbtn" onclick="window.print()">印刷 / PDF保存</button>
+  <h1>入出金管理（PaymentAdmin）税区分・バグ修正一覧</h1>
+  <p class="sub">components/PaymentAdmin.jsx ・ 2026-06-30</p>
+
+  <div class="legend">
+    <span class="pill inc">税込</span><span>受注・合計・照合</span>
+    <span class="pill exc">税抜</span><span>原価・小計</span>
+    <span class="pill warn">要確認/バグ</span>
+    <span class="pill ok">確実な是正</span>
+  </div>
+
+  <h2>① 金額項目ごとの税区分</h2>
+  <table>
+    <thead><tr><th style="width:20%">項目</th><th style="width:42%">変数 / 出所</th><th style="width:28%">税区分</th><th style="width:10%">行</th></tr></thead>
+    <tbody>
+      <tr><td>受注額</td><td><code>billingAmount = project.budget</code></td><td><span class="pill inc">税込</span></td><td class="ln">506</td></tr>
+      <tr><td>受注額(税抜)</td><td><code>billingAmountEx = toEx(budget)</code></td><td><span class="pill exc">税抜</span></td><td class="ln">507</td></tr>
+      <tr><td>外注費</td><td><code>outsourceCost = Σ total_amount</code></td><td><span class="pill exc">税抜</span></td><td class="ln">513</td></tr>
+      <tr><td>外注費(税込)</td><td><code>outsourceCostInc = Σ toInc(total_amount)</code></td><td><span class="pill inc">税込</span></td><td class="ln">514</td></tr>
+      <tr><td>自社工事費</td><td><code>selfWorkCost = Σ total_amount</code></td><td><span class="pill exc">税抜</span></td><td class="ln">510</td></tr>
+      <tr><td>管理費</td><td><code>managementFee = project.management_fee</code></td><td><span class="pill inc">税込</span> <span class="pill warn">ラベルは「税抜」表示で不一致</span></td><td class="ln">516 / 1083</td></tr>
+      <tr><td>粗利</td><td><code>billingAmountEx − outsourceCost − selfWorkCost − managementFee</code></td><td><span class="pill exc">税抜</span></td><td class="ln">520</td></tr>
+      <tr><td>入金合計</td><td><code>totalDeposit = Σ project_deposits.amount</code></td><td><span class="pill inc">実額（通常税込）</span></td><td class="ln">525</td></tr>
+      <tr><td>未回収</td><td><code>uncollected = budget(税込) − totalDeposit</code></td><td><span class="pill inc">税込で照合</span></td><td class="ln">526</td></tr>
+      <tr><td>支払合計</td><td><code>totalPaid = Σ order_payments.amount</code></td><td><span class="pill inc">実額（税込）</span></td><td class="ln">528</td></tr>
+      <tr><td>支払残</td><td><code>payBalance = outsourceCostInc(税込) − totalPaid</code></td><td><span class="pill inc">税込で照合</span></td><td class="ln">529</td></tr>
+      <tr><td>請求書単体</td><td><code>invTotal = invoice.total_amount</code></td><td><span class="pill inc">税込</span></td><td class="ln">857</td></tr>
+      <tr><td>自動完了・入金判定</td><td><code>budget(税込) ≦ 入金</code></td><td><span class="pill inc">税込（正）</span></td><td class="ln">285</td></tr>
+      <tr><td>自動完了・支払判定</td><td><code>outsourceCost(税抜) ≦ 支払</code></td><td><span class="pill warn">税抜（バグ）</span></td><td class="ln">286</td></tr>
+    </tbody>
+  </table>
+
+  <h2>② バグ箇所と修正案</h2>
+  <table>
+    <thead><tr><th style="width:4%">#</th><th style="width:16%">箇所（行）</th><th style="width:33%">不具合</th><th style="width:35%">修正案</th><th style="width:12%">区分</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td class="ln">checkAndAutoComplete 277・286</td><td>支払判定だけ税抜 → 未払いでも工事完了</td><td><code>outsourceCostInc</code>（toInc）に統一</td><td class="c"><span class="pill ok">確実</span></td></tr>
+      <tr><td>2</td><td class="ln">285・286 / フィルタ 576–579</td><td>floor/round 端数で消込が永久に閉じない</td><td>許容差 <code>EPS</code>（例:10円）を <code>- EPS</code> で適用</td><td class="c"><span class="pill ok">確実</span></td></tr>
+      <tr><td>3</td><td class="ln">1334・1379</td><td>残額バッジが <code>!==0</code> で端数でも赤</td><td><code>Math.abs(x) &gt; EPS</code> 判定に変更</td><td class="c"><span class="pill ok">確実</span></td></tr>
+      <tr><td>4</td><td class="ln">1130</td><td>統合伝票を金額一致で突合 → 同額誤マッチ</td><td><code>mergedRefs</code> の <code>id</code> で紐付け（refId参照）</td><td class="c"><span class="pill ok">確実</span></td></tr>
+      <tr><td>5</td><td class="ln">526・758・857</td><td>入金照合が budget 基準で請求額と別物</td><td>請求書発行済なら警告 or <code>invoice.total_amount</code> 照合</td><td class="c"><span class="pill warn">要判断</span></td></tr>
+      <tr><td>6</td><td class="ln">520・1083</td><td>管理費ラベル「税抜」だが値は税込／粗利で未換算</td><td>ラベルを「税込」に統一(A) or 粗利で <code>toEx</code>(B・2ファイル同時)</td><td class="c"><span class="pill warn">要判断</span></td></tr>
+      <tr><td>7</td><td class="ln">handleAddDeposit 308 ほか</td><td>入金・支払額に検証なし（過入金/相殺で永久未回収）</td><td><code>Number&gt;0</code> チェック＋過入金/過支払の警告</td><td class="c"><span class="pill warn">任意</span></td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    確実に是正できるのは <b>1・2・3・4</b>、業務判断が要るのは <b>5・6・7</b>。<br>
+    前提ルール: 受注・合計・入出金照合＝税込／原価・小計＝税抜／粗利＝税抜／管理費は税込保存。toInc=floor(×1.1)・toEx=round(÷1.1) で端数が出るため、消込には許容差(EPS)が必要。
+  </footer>
+</div>
+</body>
+</html>

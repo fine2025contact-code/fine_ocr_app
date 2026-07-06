@@ -196,10 +196,6 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
     amt = parsed.get("amount") or 0
     sd = parsed.get("startDate")
     ed = parsed.get("endDate")
-    if sd and ed and sd != ed:
-        kouki = f"{sd} ~ {ed}"
-    else:
-        kouki = ed or sd or "-"
 
     return {
         "送信": False,
@@ -363,6 +359,11 @@ def main() -> None:
             </div>
         """, unsafe_allow_html=True)
 
+        # ★ 直前の手入力登録の成功メッセージ（rerun後に1回だけ表示）
+        if st.session_state.get("manual_success_msg"):
+            st.success(st.session_state.pop("manual_success_msg"))
+            st.balloons()
+
         staff_list_manual = fetch_staff_list()
         clients_list_manual = fetch_clients_list()
 
@@ -443,6 +444,7 @@ def main() -> None:
             if not supabase_client:
                 st.error("クラウドに接続できません")
             else:
+                _manual_ok = False
                 try:
                     row_dict = {
                         "1. 元請名所": manual_client,
@@ -463,12 +465,19 @@ def main() -> None:
                         "sent_by": manual_staff,
                         "has_client_order": False,
                     }
-                    from sync_supabase import insert_fine_row as _insert
-                    _insert(supabase_client, row_dict, "")
-                    st.success(f"✅ 登録しました！担当者：{manual_staff}　※F番号は振り分け画面で割り当てられます")
-                    st.balloons()
+                    insert_fine_row(supabase_client, row_dict, "")
+                    # ★ 二重登録防止: フォームをリセット（form_key更新）して再描画
+                    #   rerun で消えないよう成功メッセージは session_state 経由で表示
+                    st.session_state.manual_success_msg = (
+                        f"✅ 登録しました！担当者：{manual_staff}　※F番号は振り分け画面で割り当てられます"
+                    )
+                    st.session_state.manual_form_key = st.session_state.get("manual_form_key", 0) + 1
+                    _manual_ok = True
                 except Exception as e:
                     st.error(f"エラー: {e}")
+                # ★ st.rerun() は内部で例外を送出するため try/except の外で呼ぶ
+                if _manual_ok:
+                    st.rerun()
 
     st.markdown("---")
 
@@ -603,11 +612,31 @@ def sync_data(edf: pd.DataFrame, supabase: Client, sent_by: str):
         st.error("送信担当者が選択されていません。担当者を選択してから送信してください。")
         return
 
+    orig_rows = st.session_state.get("fine_rows", [])
     success_count = 0
     with st.spinner(f"同期中... （送信担当者：{sent_by}）"):
         for idx, row in to_sync.iterrows():
             try:
                 row_dict = row.to_dict()
+
+                # ★ fields_display は編集テーブル(EDITOR_COLUMNS)に含まれないため元データから補完
+                if not row_dict.get("fields_display"):
+                    try:
+                        row_dict["fields_display"] = orig_rows[idx].get("fields_display", {})
+                    except (IndexError, KeyError, TypeError, AttributeError):
+                        row_dict["fields_display"] = {}
+
+                # ★ 手入力・追加行の必須チェック（元請名は必須／金額0は誤送信防止。マイナスはB表値引きとして許容）
+                moto = str(row_dict.get("1. 元請名所") or "").strip()
+                if moto in ("", "不明", "nan", "None"):
+                    raise ValueError("元請名所が未入力です。会社名を入力してください。")
+                try:
+                    _amt_chk = float(str(row_dict.get("5. 代金(金額)")).replace(",", "").replace("¥", "").replace("￥", "").strip() or 0)
+                except (ValueError, TypeError):
+                    _amt_chk = 0
+                if _amt_chk == 0 or _amt_chk != _amt_chk:  # 0 または NaN を弾く
+                    raise ValueError("金額が未入力（0）です。受注額を入力してください。")
+
                 row_dict["sent_by"] = sent_by
                 # ★ 元請発注書なしフラグを渡す
                 row_dict["has_client_order"] = not bool(row_dict.get("元請発注書なし", False))
@@ -619,9 +648,21 @@ def sync_data(edf: pd.DataFrame, supabase: Client, sent_by: str):
                 success_count += 1
             except Exception as e:
                 edf.at[idx, "ステータス"] = "エラー"
-                st.error(f"エラー ({row['ファイル名']}): {e}")
+                # ★ 手動追加行はファイル名が空のため表示名をフォールバック
+                _fname = row.get("ファイル名")
+                if _fname is None or (isinstance(_fname, float) and pd.isna(_fname)) or str(_fname).strip() == "":
+                    _fname = f"追加行 {idx + 1}"
+                st.error(f"エラー ({_fname}): {e}")
 
-    st.session_state.fine_rows = edf.to_dict("records")
+    # ★ fields_display は編集テーブルに含まれないため、元データからマージして保持する
+    new_rows = edf.to_dict("records")
+    for i, r in enumerate(new_rows):
+        if not r.get("fields_display"):
+            try:
+                r["fields_display"] = orig_rows[i].get("fields_display", {}) or {}
+            except (IndexError, AttributeError):
+                r["fields_display"] = {}
+    st.session_state.fine_rows = new_rows
     if success_count > 0:
         st.success(f"✅ {success_count} 件のデータを同期しました。（送信担当者：{sent_by}）")
         time.sleep(2)

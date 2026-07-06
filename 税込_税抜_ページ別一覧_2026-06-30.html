@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FINE 税込・税抜 ページ別一覧</title>
+<style>
+  :root{
+    --ink:#1f1e1b; --muted:#5f5e5a; --hint:#8a8980; --line:#e5e3da;
+    --card:#ffffff; --page:#f7f6f1;
+    --inc-bg:#E6F1FB; --inc-tx:#0C447C;   /* 税込 */
+    --exc-bg:#EAF3DE; --exc-tx:#27500A;   /* 税抜 */
+    --tax-bg:#FAEEDA; --tax-tx:#633806;   /* 消費税 */
+    --warn-bg:#FCEBEB; --warn-tx:#791F1F; /* 要確認 */
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);
+    font-family:-apple-system,"Segoe UI","Hiragino Sans","Yu Gothic UI",Meiryo,sans-serif;
+    line-height:1.6;padding:28px 22px 40px}
+  .sheet{max-width:920px;margin:0 auto}
+  h1{font-size:22px;font-weight:600;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 18px}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 20px;font-size:12px;color:var(--muted)}
+  .pill{font-size:11px;padding:2px 9px;border-radius:999px;white-space:nowrap;font-weight:600}
+  .inc{background:var(--inc-bg);color:var(--inc-tx)}
+  .exc{background:var(--exc-bg);color:var(--exc-tx)}
+  .tax{background:var(--tax-bg);color:var(--tax-tx)}
+  .warn{background:var(--warn-bg);color:var(--warn-tx)}
+  .sec{font-size:14px;font-weight:600;color:var(--muted);margin:22px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+  .pg{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px}
+  .pg h4{margin:0 0 1px;font-size:14px;font-weight:600}
+  .pg .fn{display:block;font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:11px;color:var(--hint);margin:0 0 9px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0;font-size:12.5px;color:var(--muted);border-top:1px solid var(--line)}
+  .row:first-of-type{border-top:none}
+  .tags{display:flex;gap:4px;flex-shrink:0}
+  footer{margin-top:24px;font-size:12px;color:var(--hint)}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <h1>FINE システム 税込・税抜 ページ別一覧</h1>
+  <p class="sub">FINE工事管理 / fine_ocr_app ・ 2026-06-30</p>
+
+  <div class="legend">
+    <span class="pill inc">税込</span><span>受注・合計</span>
+    <span class="pill exc">税抜</span><span>原価・小計・単価</span>
+    <span class="pill tax">消費税</span>
+    <span class="pill warn">要確認</span><span>基準混在・仕様確認</span>
+  </div>
+
+  <div class="sec">売上系（受注・見積・請求）</div>
+  <div class="grid">
+    <div class="pg"><h4>見積書作成</h4><span class="fn">app/estimates/create</span>
+      <div class="row"><span>小計</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+      <div class="row"><span>消費税（10%）</span><span class="tags"><span class="pill tax">消費税</span></span></div>
+      <div class="row"><span>合計・total_amount</span><span class="tags"><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>明細 unit_price / amount</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+    </div>
+    <div class="pg"><h4>請求書作成</h4><span class="fn">app/invoices/create</span>
+      <div class="row"><span>課税対象・小計・amount</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+      <div class="row"><span>消費税（10%）</span><span class="tags"><span class="pill tax">消費税</span></span></div>
+      <div class="row"><span>合計・total_amount</span><span class="tags"><span class="pill inc">税込</span></span></div>
+    </div>
+    <div class="pg"><h4>発注書発行</h4><span class="fn">app/estimates/issue-order</span>
+      <div class="row"><span>billing_amount（受注控）</span><span class="tags"><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>total_amount（初期0）</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+    </div>
+    <div class="pg"><h4>見積一覧 / 請求一覧 / スケジュール</h4><span class="fn">app/estimates・invoices/list, schedule</span>
+      <div class="row"><span>金額（total_amount）表示</span><span class="tags"><span class="pill inc">税込</span></span></div>
+    </div>
+  </div>
+
+  <div class="sec">発注系（原価・注文書）</div>
+  <div class="grid">
+    <div class="pg"><h4>注文書編集</h4><span class="fn">components/OrderEditForm.js</span>
+      <div class="row"><span>発注小計・total_amount</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+      <div class="row"><span>消費税 / grandTotal</span><span class="tags"><span class="pill tax">消費税</span><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>billing_amount / 管理費</span><span class="tags"><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>粗利（修正後）</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+    </div>
+    <div class="pg"><h4>注文書PDF</h4><span class="fn">components/OrderPdf.jsx</span>
+      <div class="row"><span>明細・単価（保存）</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+      <div class="row"><span>表示は税抜/税込で切替可</span><span class="tags"><span class="pill exc">税抜</span><span class="pill inc">税込</span></span></div>
+    </div>
+    <div class="pg"><h4>発注振り分け</h4><span class="fn">components/OrderDistributor.jsx</span>
+      <div class="row"><span>total_amount（保存）</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+      <div class="row"><span>budget / billing / 残金計上</span><span class="tags"><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>自社施工（÷1.1で単価化）</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+    </div>
+  </div>
+
+  <div class="sec">経営・入金</div>
+  <div class="grid">
+    <div class="pg"><h4>経営ダッシュボード</h4><span class="fn">components/f18Dashboard.jsx</span>
+      <div class="row"><span>受注（budget）</span><span class="tags"><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>原価（total_amount）</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+      <div class="row"><span>粗利</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+    </div>
+    <div class="pg"><h4>月次粗利グラフ</h4><span class="fn">components/Dashboard.js</span>
+      <div class="row"><span>売上（billing_amount）</span><span class="tags"><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>粗利（修正後）</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+    </div>
+    <div class="pg"><h4>入金管理</h4><span class="fn">components/PaymentAdmin.jsx</span>
+      <div class="row"><span>表示・入金照合</span><span class="tags"><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>粗利</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+    </div>
+    <div class="pg"><h4>経費入力</h4><span class="fn">components/MaterialCostInput.js</span>
+      <div class="row"><span>経費合計</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+    </div>
+  </div>
+
+  <div class="sec">入力・取込</div>
+  <div class="grid">
+    <div class="pg"><h4>案件登録</h4><span class="fn">components/ProjectForm.jsx</span>
+      <div class="row"><span>budget（元請受注）</span><span class="tags"><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>小計（明細）</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+      <div class="row"><span>budget未入力時に税抜小計を代入</span><span class="tags"><span class="pill warn">要確認</span></span></div>
+    </div>
+    <div class="pg"><h4>書類管理（請求書編集）</h4><span class="fn">app/documents</span>
+      <div class="row"><span>subtotal</span><span class="tags"><span class="pill exc">税抜</span></span></div>
+      <div class="row"><span>total_amount</span><span class="tags"><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>課税/非課税を区別せず全額課税</span><span class="tags"><span class="pill warn">要確認</span></span></div>
+    </div>
+    <div class="pg"><h4>OCR取込</h4><span class="fn">fine_ocr_app（parsing / sync / app）</span>
+      <div class="row"><span>抽出 amount → projects.budget</span><span class="tags"><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>手入力「受注額（税込）」</span><span class="tags"><span class="pill inc">税込</span></span></div>
+      <div class="row"><span>税抜しか読めない帳票での誤差</span><span class="tags"><span class="pill warn">要確認</span></span></div>
+    </div>
+  </div>
+
+  <footer>基本ルール: 売上＝合計は税込／発注＝原価・小計・単価は税抜／消費税＝課税行のみ×0.1（切り捨て）／粗利＝税抜（統一済み）。</footer>
+</div>
+</body>
+</html>
