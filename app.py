@@ -22,7 +22,8 @@ import easyocr
 from supabase import Client, create_client
 
 from parsing import parse_ocr_text, set_supabase_client
-from sync_supabase import insert_fine_row
+from sync_supabase import insert_fine_row, build_project_name
+from dup_check import make_key
 
 st.set_page_config(
     page_title="FINE OCR",
@@ -148,6 +149,41 @@ def fetch_clients_list() -> list[str]:
         return []
 
 
+# ★ 既存工事（projects）の重複判定キーを取得（2026-07-07 追加）
+#   会社名・工事名・金額・現場住所の4項目キーの集合を返す。
+#   読み込み時に、この集合と照合して重複を通知する（web側の赤枠と同じ4項目ルール）。
+#   ttl=60秒でキャッシュ（送信直後の反映遅延は同一バッチ内チェックで補完）。
+@st.cache_data(ttl=60)
+def fetch_existing_project_keys() -> set[str]:
+    try:
+        supabase = _get_supabase()
+        if not supabase:
+            return set()
+        keys: set[str] = set()
+        start, page = 0, 1000
+        while True:
+            res = (
+                supabase.table("projects")
+                .select("client_name, name, budget, site_address, status")
+                .neq("status", "deleted")
+                .neq("status", "merged")
+                .range(start, start + page - 1)
+                .execute()
+            )
+            rows = res.data or []
+            for p in rows:
+                k = make_key(p.get("client_name"), p.get("name"), p.get("budget"), p.get("site_address"))
+                if k:
+                    keys.add(k)
+            if len(rows) < page:
+                break
+            start += page
+        return keys
+    except Exception as e:
+        st.sidebar.warning(f"重複チェック用データ取得エラー: {e}")
+        return set()
+
+
 # ★ 都道府県・市区町村マスタ
 AICHI_CITIES = [
     "名古屋市中区", "名古屋市北区", "名古屋市西区", "名古屋市東区",
@@ -199,6 +235,7 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "送信": False,
+        "⚠️重複": "",                # ★ 読み込み時の重複検知結果（表示直前に再計算）
         "元請発注書なし": False,      # ★ 手入力時にチェックすると has_client_order=False になる
         "ファイル名": filename,
         "1. 元請名所":              parsed.get("company") or "不明",
@@ -222,7 +259,7 @@ def parsed_to_row(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
 
 
 EDITOR_COLUMNS = [
-    "送信", "元請発注書なし", "ファイル名", "1. 元請名所",
+    "送信", "⚠️重複", "元請発注書なし", "ファイル名", "1. 元請名所",
     "2. 契約番号(注文/工事)",
     "2-1. 現場ID/契約枝番号",
     "2-2. 発注枝番",
@@ -489,6 +526,37 @@ def main() -> None:
         """, unsafe_allow_html=True)
         return
 
+    # ★ 重複検知（2026-07-07）：会社名・工事名・金額・現場住所の4項目一致を
+    #   既存工事（DB）および同一バッチ内の他行と照合し、⚠️重複列を立てる。
+    #   未送信行のみを対象（完了行はDBに存在して当然のため除外）。
+    existing_keys = fetch_existing_project_keys()
+    batch_counts: dict[str, int] = {}
+    for r in st.session_state.fine_rows:
+        if r.get("ステータス") == "完了":
+            continue
+        k = make_key(
+            r.get("1. 元請名所"), build_project_name(r),
+            r.get("5. 代金(金額)"), r.get("4. 施工場所(現場住所)"),
+        )
+        if k:
+            batch_counts[k] = batch_counts.get(k, 0) + 1
+
+    dup_count = 0
+    for r in st.session_state.fine_rows:
+        if r.get("ステータス") == "完了":
+            r["⚠️重複"] = ""
+            continue
+        k = make_key(
+            r.get("1. 元請名所"), build_project_name(r),
+            r.get("5. 代金(金額)"), r.get("4. 施工場所(現場住所)"),
+        )
+        is_dup = bool(k) and (k in existing_keys or batch_counts.get(k, 0) >= 2)
+        if is_dup:
+            r["⚠️重複"] = "⚠️ 重複の可能性"
+            dup_count += 1
+        else:
+            r["⚠️重複"] = ""
+
     df = pd.DataFrame(st.session_state.fine_rows)
 
     m1, m2 = st.columns(2)
@@ -497,6 +565,21 @@ def main() -> None:
     with m2:
         complete_count = len(df[df["ステータス"] == "完了"])
         st.metric("同期完了", f"{complete_count} / {len(df)}")
+
+    # ★ 重複の可能性がある場合は目立つ警告バナーを表示
+    if dup_count > 0:
+        st.markdown(f"""
+            <div style="background-color:#fef2f2;border:2px solid #ef4444;border-left:8px solid #ef4444;
+                        padding:1rem 1.2rem;margin-bottom:1rem;border-radius:0.6rem;">
+                <p style="color:#b91c1c;font-size:1.25rem;font-weight:800;margin:0;">
+                    ⚠️ {dup_count} 件が既存の工事と重複している可能性があります
+                </p>
+                <p style="color:#b91c1c;font-size:0.95rem;font-weight:600;margin:0.3rem 0 0;">
+                    会社名・工事名・金額・現場住所がすべて一致しています。
+                    「⚠️重複」列を確認し、二重登録でないかご確認のうえ送信してください。
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
 
     tab1, tab2 = st.tabs(["📋 データ編集・送信", "📄 抽出テキスト確認"])
 
@@ -554,6 +637,10 @@ def main() -> None:
             num_rows="dynamic",
             column_config={
                 "送信": st.column_config.CheckboxColumn("送信", default=False),
+                "⚠️重複": st.column_config.TextColumn(
+                    "⚠️重複", disabled=True,
+                    help="会社名・工事名・金額・現場住所がすべて一致する工事が既にある（または同じ内容が複数読み込まれている）場合に表示されます。二重登録でないかご確認ください。",
+                ),
                 "元請発注書なし": st.column_config.CheckboxColumn("📄 元請発注書なし", default=False),
                 "5. 代金(金額)": st.column_config.NumberColumn("5. 代金(金額)", format="¥%d", min_value=-99000000),
                 "注文No(F番号)": st.column_config.TextColumn("注文No", disabled=True, help="F番号（F190001〜）は振り分け画面で割り当てられます。毎年3/1にプレフィックスが更新されます。"),

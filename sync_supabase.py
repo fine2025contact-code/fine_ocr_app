@@ -94,6 +94,24 @@ def _db_start_date_from_k(val: Any) -> str | None:
     return f"{y:04d}-{mo:02d}-{d:02d}"
 
 
+def build_project_name(row: dict[str, Any]) -> str:
+    """
+    OCR行から projects.name（保存される工事名）を組み立てる。
+    ★ 3-1（邸名・棟番号含む）を優先、なければ3. 現場名。内容(6)を末尾に付す。
+    重複判定のキーと、実際にDBへ保存される name を一致させるため、
+    insert_fine_row と重複チェック(app.py)の両方からこの関数を使う。
+    """
+    fd = row.get("fields_display", {}) or {}
+    raw_koji    = row.get("3-1. 工事名(邸名)") or fd.get("no3_1_kojimei") or ""
+    raw_site    = row.get("3. 現場名(事業名)") or fd.get("no3_site_name") or ""
+    raw_content = row.get("6. 工事件名(内容/名称)") or fd.get("no6_content") or "名称未設定"
+
+    base_name = raw_koji if raw_koji else raw_site
+    if base_name and base_name not in raw_content:
+        return f"{base_name} {raw_content}".strip()
+    return str(raw_content)
+
+
 def insert_fine_row(
     supabase: Client,
     row: dict[str, Any],
@@ -118,19 +136,8 @@ def insert_fine_row(
     )
     client_id = resolve_client_id(moto_name)
 
-    # 3. 工事名・現場名
-    # ★ 3-1（邸名・棟番号含む）を優先、なければ3. 現場名を使用
-    raw_koji    = row.get("3-1. 工事名(邸名)") or fd.get("no3_1_kojimei") or ""
-    raw_site    = row.get("3. 現場名(事業名)") or fd.get("no3_site_name") or ""
-    raw_content = row.get("6. 工事件名(内容/名称)") or fd.get("no6_content") or "名称未設定"
-
-    # ★ 3-1に棟番号・号地などが含まれている場合は3-1を優先
-    base_name = raw_koji if raw_koji else raw_site
-
-    if base_name and base_name not in raw_content:
-        name = f"{base_name} {raw_content}".strip()
-    else:
-        name = str(raw_content)
+    # 3. 工事名・現場名（重複判定と保存名を一致させるため共通関数を使用）
+    name = build_project_name(row)
 
     # 4. 番号類（振り分け画面での参照用に保存）
     code_no1 = str(row.get("2. 契約番号(注文/工事)") or fd.get("no2_id") or "")
