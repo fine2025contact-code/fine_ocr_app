@@ -99,9 +99,9 @@ st.markdown("""
 
 @st.cache_resource
 def load_ocr():
+    # 遅延読み込み：起動時ではなく、実際にOCRが必要になった時だけ
+    # easyocr(PyTorch)をメモリに読み込む。@st.cache_resource で初回のみ実行。
     return easyocr.Reader(['ja', 'en'], gpu=False)
-
-ocr_reader = load_ocr()
 
 
 @st.cache_resource
@@ -220,7 +220,7 @@ def extract_pdf_text_local(file_bytes: bytes, filename: str) -> str:
             else:
                 pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
                 img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
-                result = ocr_reader.readtext(img, detail=0)
+                result = load_ocr().readtext(img, detail=0)
                 if result:
                     full_text_list.extend(result)
     finally:
