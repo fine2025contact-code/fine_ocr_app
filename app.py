@@ -11,6 +11,7 @@ UI：カスタムCSSによるデザイン強化 & タイトル横ポタポタ水
 
 from __future__ import annotations
 
+import gc
 import time
 from typing import Any
 
@@ -18,7 +19,8 @@ import fitz  # PyMuPDF
 import pandas as pd
 import streamlit as st
 import numpy as np
-import easyocr
+# 注意: easyocr はここで import しない（import自体がPyTorchを読み込みメモリを大量消費するため、
+# load_ocr() の中で遅延importする。起動時クラッシュ対策 2026-07-11）
 from supabase import Client, create_client
 
 from parsing import parse_ocr_text, set_supabase_client
@@ -101,6 +103,9 @@ st.markdown("""
 def load_ocr():
     # 遅延読み込み：起動時ではなく、実際にOCRが必要になった時だけ
     # easyocr(PyTorch)をメモリに読み込む。@st.cache_resource で初回のみ実行。
+    # import もここで行う（トップレベルでimportするとPyTorchが起動時に読み込まれ、
+    # Streamlit無料枠のメモリを圧迫して「Oh no」クラッシュの原因になるため）
+    import easyocr
     return easyocr.Reader(['ja', 'en'], gpu=False)
 
 
@@ -218,11 +223,25 @@ def extract_pdf_text_local(file_bytes: bytes, filename: str) -> str:
             if len(direct_text.strip()) > 50:
                 full_text_list.append(direct_text)
             else:
-                pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+                # メモリ超過対策（2026-07-11）:
+                # ・グレースケール化で画像メモリを1/3に（OCR精度への影響はほぼ無し）
+                # ・巨大ページは長辺2200pxに制限（A3や高解像度スキャンでの膨張を防止）
+                zoom = 1.5
+                long_side = max(page.rect.width, page.rect.height) * zoom
+                if long_side > 2200:
+                    zoom = 2200 / max(page.rect.width, page.rect.height)
+                pix = page.get_pixmap(
+                    matrix=fitz.Matrix(zoom, zoom),
+                    colorspace=fitz.csGRAY,
+                    alpha=False,
+                )
+                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w)
                 result = load_ocr().readtext(img, detail=0)
                 if result:
                     full_text_list.extend(result)
+                # ページごとに画像を即解放（複数ページPDFでのメモリ蓄積を防止）
+                del pix, img
+                gc.collect()
     finally:
         doc.close()
     return "\n".join(full_text_list)
